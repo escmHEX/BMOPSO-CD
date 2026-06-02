@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import math
+
+from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
+from binary_mopso_cd.metrics import archive_metrics, calculate_hypervolume, calculate_spread
+from binary_mopso_cd.progress import ProgressLogger
+
+
+def solution(f1: float, f2: float, idx: int) -> Solution:
+    return Solution(
+        SemanticVector({"role": f"role {idx}", "topic": f"topic {idx}", "action": f"action {idx}"}),
+        f"prompt {idx}",
+        f"text {idx}",
+        Objectives(f1, f2),
+    )
+
+
+def test_hypervolume_and_spread_follow_local_convention():
+    points = [(0.2, 0.9), (0.5, 0.6), (0.9, 0.2)]
+    distances = [math.dist(points[0], points[1]), math.dist(points[1], points[2])]
+    mean_distance = sum(distances) / len(distances)
+    expected_spread = sum(abs(distance - mean_distance) for distance in distances) / (
+        len(distances) * mean_distance
+    )
+
+    assert calculate_hypervolume(points) == 0.44
+    assert math.isclose(calculate_spread(points), expected_spread)
+
+
+def test_archive_metrics_normalize_fidelity_and_clamp_diversity():
+    metrics = archive_metrics([solution(-1.0, 1.5, 1), solution(1.0, 0.5, 2)])
+
+    assert metrics["hypervolume"] == 0.5
+    assert metrics["spread"] is None
+
+
+def test_progress_logger_writes_generation_line(test_config, tmp_path):
+    test_config.set("logging.console", False)
+    logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
+
+    logger.generation(1, 2, modified_count=3, population_size=4, archive_size=5, hypervolume=0.25, spread=None)
+    logger.close()
+
+    text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
+    assert "generation 1/2" in text
+    assert "modified=3/4" in text
+    assert "archive=5" in text
+    assert "hv=0.250000" in text
+    assert "spread=NA" in text
+
+
+def test_progress_logger_records_errors(test_config, tmp_path):
+    test_config.set("logging.console", False)
+    logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
+
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError:
+        logger.exception("run failed")
+    logger.close()
+
+    text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
+    assert "ERROR" in text
+    assert "run failed" in text
+    assert "RuntimeError: boom" in text

@@ -400,6 +400,15 @@
     </div>
   </section>
 
+  <section class="section runtime">
+    <h3>RUNTIME - Logging de progreso</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Normalizacion solo para HV/spread</h4><div class="math">\[x=\operatorname{clip}\left(\frac{f_1+1}{2},0,1\right)\]\[y=\operatorname{clip}(f_2,0,1)\]</div><p>No cambia objetivos ni decisiones del optimizador.</p></div>
+      <div class="formula-card"><h4>Hypervolume</h4><div class="math">\[HV=\sum_k(x_k-x_{k-1})y_k,\qquad r=(0,0)\]</div><p>Usa puntos no dominados normalizados y colapsados por \(x\).</p></div>
+      <div class="formula-card"><h4>Spread</h4><div class="math">\[Spread=\frac{\sum_i |d_i-\bar d|}{m\bar d}\]</div><p>\(d_i\) son distancias consecutivas del frente normalizado.</p></div>
+    </div>
+  </section>
+
   <section class="section checkpoint">
     <h3>CHECKPOINT - Escritura diferida</h3>
     <div class="formula-grid">
@@ -436,7 +445,7 @@
       <tr class="exec"><td>EXEC</td><td>DistilBERT</td><td>\(MLM\)</td><td>distilbert-base-uncased</td><td><code>models.distilbert.model</code></td><td>Fill-mask.</td><td class="status-ok">OK</td></tr>
       <tr class="exec"><td>EXEC</td><td>Top-k multiplier</td><td>\(m_{tur}\)</td><td>3</td><td><code>models.distilbert.top_k_multiplier</code></td><td>\(M_{tur}=3K_{cand}\).</td><td class="status-ok">OK</td></tr>
       <tr class="exec"><td>EXEC</td><td>spaCy</td><td>\(NLP\)</td><td>en_core_web_sm</td><td><code>models.spacy.model</code></td><td>Monitor.</td><td class="status-ok">OK</td></tr>
-      <tr class="exec"><td>EXEC</td><td>WordNet/PPDB</td><td>\(WN,PPDB\)</td><td>true/true</td><td><code>models.wordnet.enabled</code>, <code>models.ppdb.*</code></td><td>Turbulencia fallback.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>WordNet/PPDB</td><td>\(WN,PPDB\)</td><td>true/{venv}/var/binary_mopso_cd/ppdb_index.sqlite</td><td><code>models.wordnet.enabled</code>, <code>models.ppdb.*</code></td><td>Turbulencia fallback con indice SQLite local al environment.</td><td class="status-ok">OK</td></tr>
       <tr class="init"><td>INIT</td><td>Alphas</td><td>\(\alpha_{role},\alpha_{topic},\alpha_{action}\)</td><td>1.4, 1.0, 1.2</td><td><code>semantic_components.rules.*.alpha</code></td><td>Tamano de pools.</td><td class="status-ok">OK</td></tr>
       <tr class="init"><td>INIT</td><td>Max words</td><td>\(W_{role},W_{topic},W_{action}\)</td><td>6, 8, 6</td><td><code>semantic_components.rules.*.max_words</code></td><td>Validacion de componentes.</td><td class="status-ok">OK</td></tr>
       <tr class="init"><td>INIT</td><td>Orden expansion</td><td>\(O_{exp}\)</td><td>role, action, topic</td><td><code>semantic_components.expansion_order</code></td><td>Expansion de pools.</td><td class="status-ok">OK</td></tr>
@@ -467,6 +476,7 @@
       <tr class="runtime"><td>RUNTIME</td><td>Resume</td><td>\(resume\)</td><td>null</td><td><code>runtime.resume_from</code>, <code>--resume-from</code></td><td>Reanudar corrida.</td><td class="status-ok">OK</td></tr>
       <tr class="runtime"><td>RUNTIME</td><td>Cache embeddings</td><td>\(cache_E\)</td><td>embedding_cache.json</td><td><code>runtime.embedding_cache_file</code></td><td>Cache persistente.</td><td class="status-ok">OK</td></tr>
       <tr class="runtime"><td>RUNTIME</td><td>Carga eager</td><td>\(load_{eager}\)</td><td>true</td><td><code>runtime.eager_load_models</code></td><td>Carga recursos pesados una vez.</td><td class="status-ok">OK</td></tr>
+      <tr class="runtime"><td>RUNTIME</td><td>Logging progreso</td><td>\(log\)</td><td>true/runtime.log</td><td><code>logging.*</code></td><td>Inicio, generacion, modificadas, HV, spread, fin y errores sin costo de modelos.</td><td class="status-ok">OK</td></tr>
     </tbody>
   </table>
 </main>

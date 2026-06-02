@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from binary_mopso_cd.runner import ExperimentRunner
@@ -31,6 +32,12 @@ def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
     assert (outdir / "population_evaluated.json").exists()
     assert (outdir / "pareto_front.json").exists()
     assert (outdir / "llm_calls.jsonl").exists()
+    assert (outdir / "runtime.log").exists()
+    with (outdir / "evolucion_metricas.csv").open("r", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert "modified_count" in row
+    assert "hypervolume" in row
+    assert "spread" in row
 
 
 def test_reduced_monitor_run_observes_without_decision_feedback(test_config, tmp_path):

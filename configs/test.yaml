@@ -18,6 +18,10 @@ models:
     default: "all-MiniLM-L6-v2"
     batch_size: 16
     config_version: "sbert-test-v1"
+  ppdb:
+    enabled: true
+    source_path: "tests/fixtures/ppdb_sample.txt"
+    index_path: "{venv}/var/binary_mopso_cd/pytest_ppdb_index.sqlite"
 
 selection:
   enabled: true

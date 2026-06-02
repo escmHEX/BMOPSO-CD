@@ -16,8 +16,25 @@ ollama pull llama3.1:8b
 ollama pull qwen3.5:2b
 ```
 
-Place a compact PPDB index at `data/turbulence/ppdb_index.json` or update
-`models.ppdb.index_path` in the config.
+The setup commands are normally run once. Python dependencies stay inside
+`.venv`, Ollama models stay in the local Ollama store, and Hugging Face models
+stay in the user cache.
+
+PPDB is also local. By default, the project builds a SQLite index once under the
+active Python environment:
+
+```text
+{venv}/var/binary_mopso_cd/ppdb_index.sqlite
+```
+
+The default PPDB source is the sibling experiments folder:
+
+```text
+../Experimentos/data/external/ppdb/ppdb-2.0-s-all
+```
+
+Use `--ppdb-source` or `--ppdb-index` if your paths differ. The raw PPDB file and
+the generated SQLite index are not tracked by Git.
 
 ## Run
 
@@ -37,6 +54,8 @@ Useful flags:
 --disable-selection
 --router-heuristic semantic_pool_generation=false
 --task-model synthetic_text_generation=qwen3.5:2b
+--ppdb-source ../Experimentos/data/external/ppdb/ppdb-2.0-s-all
+--ppdb-index .venv/var/binary_mopso_cd/ppdb_index.sqlite
 --enable-checkpoint
 --checkpoint-every 1
 --resume-from exec/<run>/checkpoints/generation_0001.json
@@ -62,6 +81,7 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 - `final_selection_hybrid.json`
 - `evolucion_metricas.csv`
 - `runtime.txt`
+- `runtime.log`
 - `llm_calls.jsonl`
 - `archive_history.jsonl`
 - `checkpoints/generation_*.json` when checkpointing is enabled

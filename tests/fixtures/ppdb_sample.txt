@@ -1,0 +1,5 @@
+[X] ||| help ||| aid ||| features ||| Equivalence
+[X] ||| help ||| support ||| features ||| Equivalence
+[X] ||| help ||| relief ||| features ||| Equivalence
+[X] ||| alert ||| warn ||| features ||| Equivalence
+[X] ||| alert ||| notify ||| features ||| Equivalence

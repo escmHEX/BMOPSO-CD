@@ -24,10 +24,16 @@ caches/
 .cache/
 *.jsonl
 *.log
+*.sqlite
+*.sqlite-*
+*.db
 
 data/generated/
 data/external/
 data/turbulence/*.json
+data/turbulence/*.sqlite
+data/turbulence/*.sqlite-*
+data/turbulence/*.db
 !data/turbulence/.gitkeep
 
 *.pt

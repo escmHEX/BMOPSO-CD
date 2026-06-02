@@ -184,6 +184,9 @@ class RuntimeConfig:
             raise ValueError("models.sbert.batch_size must be positive")
         if int(self.get("models.distilbert.top_k_multiplier", 3)) <= 0:
             raise ValueError("models.distilbert.top_k_multiplier must be positive")
+        if bool(self.get("models.ppdb.enabled", True)):
+            if not str(self.get("models.ppdb.index_path", "")).strip():
+                raise ValueError("models.ppdb.index_path must be configured when PPDB is enabled")
         if int(self.get("selection.k", 5)) <= 0:
             raise ValueError("selection.k must be positive")
         lambda_mmr = float(self.get("selection.lambda_mmr", 0.35))
@@ -191,6 +194,8 @@ class RuntimeConfig:
             raise ValueError("selection.lambda_mmr must be in [0, 1]")
         if float(self.get("selection.tau_min", 0.20)) > float(self.get("selection.tau_max", 0.94)):
             raise ValueError("selection.tau_min must not exceed selection.tau_max")
+        if str(self.get("logging.level", "INFO")).upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError("logging.level must be a valid Python logging level")
         if bool(self.get("ollama.speculative_decoding_enabled", False)):
             raise NotImplementedError(
                 "Speculative decoding is intentionally blocked until Ollama exposes "

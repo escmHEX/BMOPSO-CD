@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 import string
-from pathlib import Path
 from typing import Any
 
+from binary_mopso_cd.services.ppdb import PPDBSQLiteIndex
 from binary_mopso_cd.utils import canonical_text, unique_preserve_order
 
 
@@ -51,22 +50,9 @@ class DistilBertFillMaskProvider:
         return build_variants(tokens, target_index, unique_preserve_order(replacements), max_variants)
 
 
-class PPDBIndex:
-    def __init__(self, path: Path | None):
-        self.path = path
-        self.entries: dict[str, list[str]] = {}
-        if path and path.exists():
-            with path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-            self.entries = {canonical_text(key): list(value) for key, value in payload.get("entries", {}).items()}
-
-    def lookup(self, word: str) -> list[str]:
-        return list(self.entries.get(canonical_text(word), []))
-
-
 class WordNetPPDBProvider:
-    def __init__(self, ppdb_path: Path | None, use_wordnet: bool = True):
-        self.ppdb = PPDBIndex(ppdb_path)
+    def __init__(self, ppdb: PPDBSQLiteIndex | None, use_wordnet: bool = True):
+        self.ppdb = ppdb
         self.use_wordnet = use_wordnet
         self._wordnet: Any | None = None
 
@@ -104,15 +90,15 @@ class WordNetPPDBProvider:
                 for lemma in synset.lemmas():
                     replacements.append(lemma.name().replace("_", " "))
         if use_ppdb and len(unique_preserve_order(replacements)) < max_variants:
-            replacements.extend(self.ppdb.lookup(target))
+            replacements.extend(self.ppdb.lookup(target) if self.ppdb else [])
             if target_lemma:
-                replacements.extend(self.ppdb.lookup(target_lemma))
+                replacements.extend(self.ppdb.lookup(target_lemma) if self.ppdb else [])
         filtered = []
         for replacement in replacements:
             value = replacement.strip()
             if not value or canonical_text(value) == canonical_text(target):
                 continue
-            if not TOKEN_RE.fullmatch(value.replace(" ", "")):
+            if not TOKEN_RE.fullmatch(value):
                 continue
             filtered.append(value)
         return build_variants(tokens, target_index, unique_preserve_order(filtered), max_variants)

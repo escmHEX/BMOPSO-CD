@@ -23,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable-selection", action="store_true", help="Disable final selection module.")
     parser.add_argument("--router-heuristic", action="append", default=[], help="name=true|false override.")
     parser.add_argument("--task-model", action="append", default=[], help="task=model override.")
+    parser.add_argument("--ppdb-source", type=Path, default=None, help="PPDB source file used to build the local index.")
+    parser.add_argument("--ppdb-index", type=Path, default=None, help="PPDB SQLite index path.")
     parser.add_argument("--enable-checkpoint", action="store_true", help="Enable deferred optimizer checkpoints.")
     parser.add_argument("--checkpoint-every", type=int, default=None, help="Checkpoint interval in generations.")
     parser.add_argument("--checkpoint-interval", type=int, default=None, help="Alias for --checkpoint-every.")
@@ -66,6 +68,10 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
             raise ValueError(f"Expected task=model assignment, got {assignment!r}")
         task, model = assignment.split("=", 1)
         config.set(f"router.task_models.{task.strip()}", model.strip())
+    if args.ppdb_source is not None:
+        config.set("models.ppdb.source_path", str(args.ppdb_source))
+    if args.ppdb_index is not None:
+        config.set("models.ppdb.index_path", str(args.ppdb_index))
     if args.enable_checkpoint:
         config.set("checkpoint.enabled", True)
     checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else args.checkpoint_every

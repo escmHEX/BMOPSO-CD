@@ -22,6 +22,8 @@ Ollama usage, and external observational metrics.
   repeated embedding calls.
 - The monitor is observational. It writes metrics and overhead but is not read
   by the optimizer.
+- Progress logging is observational. It writes one low-cost line per generation
+  using already evaluated objectives and never feeds optimizer decisions.
 - Speculative decoding is blocked because no exact Ollama option was selected
   for this implementation.
 
@@ -157,6 +159,9 @@ hyperparameter rows.
 | `SELECT` | Final selection count | \(K_{eff}=\min(K_{sel},n_f)\). | `selection.k`; loop stops at \(K_{sel}\) or no remaining candidates. | OK |
 | `MONITOR` | KMeans inertia | \(I=\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\). | `ObservationalMonitor.observe`; not read by optimizer. | OK |
 | `MONITOR` | Entity entropy | \(H_{ent}=-\sum_{\ell}p_\ell\ln p_\ell\), where \(p_\ell\) is the empirical frequency of entity label \(\ell\). | `entity_entropy`; spaCy labels only; not read by optimizer. | OK |
+| `RUNTIME` | HV logging normalization | \(x=\operatorname{clip}((f_1+1)/2,0,1)\), \(y=\operatorname{clip}(f_2,0,1)\). | `metrics.normalized_objective_point`; used only for progress metrics. | OK |
+| `RUNTIME` | Hypervolume progress metric | \(HV=\sum_k(x_k-x_{k-1})y_k\), over collapsed non-dominated points sorted by \(x\), with reference \((0,0)\). | `metrics.calculate_hypervolume`; not read by optimizer. | OK |
+| `RUNTIME` | Spread progress metric | \(Spread=\frac{\sum_i\lvert d_i-\bar d\rvert}{m\bar d}\), where \(d_i\) are consecutive distances in the normalized non-dominated front. | `metrics.calculate_spread`; not read by optimizer. | OK |
 | `CHECKPOINT` | Checkpoint trigger | Save only if checkpoints are enabled and \(g\bmod interval=0\). | `CheckpointManager`; disabled by default. | OK |
 
 ## Hiperparámetros implementados
@@ -199,7 +204,7 @@ hyperparameter rows.
 | `EXEC` | DistilBERT top-k multiplier | \(m_{tur}\) | 3 | `models.distilbert.top_k_multiplier` | Computes \(M_{tur}=3K_{cand}\). | OK |
 | `EXEC` | spaCy model | \(NLP\) | `en_core_web_sm` | `models.spacy.model` | Entity entropy monitor only. | OK |
 | `EXEC` | WordNet enabled | \(WN\) | `true` | `models.wordnet.enabled` | WordNet replacement source. | OK |
-| `EXEC` | PPDB enabled/path | \(PPDB\) | `true`, `data/turbulence/ppdb_index.json` | `models.ppdb.enabled`, `models.ppdb.index_path` | PPDB fallback replacement source. | OK |
+| `EXEC` | PPDB enabled/path | \(PPDB\) | `true`, `{venv}/var/binary_mopso_cd/ppdb_index.sqlite` | `models.ppdb.enabled`, `models.ppdb.source_path`, `models.ppdb.index_path` | SQLite PPDB fallback replacement source, built once inside the active Python environment. | OK |
 | `INIT` | Component alpha: role | \(\alpha_{role}\) | 1.4 | `semantic_components.rules.role.alpha` | Pool size weighting for role. | OK |
 | `INIT` | Component alpha: topic | \(\alpha_{topic}\) | 1.0 | `semantic_components.rules.topic.alpha` | Pool size weighting for topic. | OK |
 | `INIT` | Component alpha: action | \(\alpha_{action}\) | 1.2 | `semantic_components.rules.action.alpha` | Pool size weighting for action. | OK |
@@ -242,13 +247,14 @@ hyperparameter rows.
 | `RUNTIME` | Resume path | \(resume\) | null | `runtime.resume_from`, `--resume-from` | Resume from checkpoint snapshot. | OK |
 | `RUNTIME` | Embedding cache file | \(cache_E\) | `embedding_cache.json` | `runtime.embedding_cache_file` | Persistent embedding cache path in outputs. | OK |
 | `RUNTIME` | Eager model loading | \(load_{eager}\) | `true` | `runtime.eager_load_models` | Loads heavy services once at executor startup. | OK |
+| `RUNTIME` | Progress logging | \(log\) | `true`, `runtime.log` | `logging.enabled`, `logging.console`, `logging.file`, `logging.level` | Logs run start/end, generation progress, modified count, HV, spread and errors without extra model calls. | OK |
 
 ## Fidelity Traceability
 
 | Normative source | Strategy rule | Implementation | Config | Test |
 | --- | --- | --- | --- | --- |
 | `estrategia_modulo_enrutamiento_semantico_v2_top_p_synthetic.html` | Router selects algorithms and LLM parameters; influence schedule uses zero-based iteration in `[0, G-1]`. | `src/binary_mopso_cd/router.py` | `router.heuristics`, `router.llm_params`, `router.task_models` | `tests/unit/test_router.py`, `tests/unit/test_runtime_schedules.py` |
-| `estrategia_modulo_ejecucion_tareas_semanticas_v1.html` | Executor dispatches `LLM`, `SBERT`, `DeterministicPromptGenerator`, `distilbert_fill_mask`, `wordnet_ppdb`; no router-side execution. | `src/binary_mopso_cd/executor.py`, `src/binary_mopso_cd/services/*` | `models.*`, `ollama.*` | `tests/unit/test_executor.py` |
+| `estrategia_modulo_ejecucion_tareas_semanticas_v1.html` | Executor dispatches `LLM`, `SBERT`, `DeterministicPromptGenerator`, `distilbert_fill_mask`, `wordnet_ppdb`; no router-side execution. | `src/binary_mopso_cd/executor.py`, `src/binary_mopso_cd/services/*` | `models.*`, `ollama.*` | `tests/unit/test_executor.py`, `tests/unit/test_ppdb_sqlite.py` |
 | `estrategia_generacion_texto_gi_v3_executor_clase_estatica.html` | Synthetic generation sends exactly the rendered prompt as user prompt, plain text only, `stream=false`. | `src/binary_mopso_cd/llm_prompts.py`, `src/binary_mopso_cd/services/ollama_client.py` | `router.llm_params.synthetic_text_generation`, `ollama.stream` | `tests/unit/test_executor.py` |
 | `estrategia_composicion_deterministica_prompt_v6_generalizada_corregida.html` | One deterministic canonical template per component subset, generalized template for extra components, no LLM composer. | `src/binary_mopso_cd/services/prompt_renderer.py` | `semantic_components.order` | `tests/integration/test_reduced_runs.py` |
 | `estrategia_inicializacion_poblacion_hibrida_v12_Router.html` | Extract anchors, build/expand pools, never exceed `4N` sampled combinations, reduce to `2N` by prompt diversity, generate texts and select top `N`. | `src/binary_mopso_cd/initialization.py` | `initialization.*`, `semantic_components.rules`, `semantic_components.expansion_order` | `tests/unit/test_initialization_sampling.py`, `tests/integration/test_reduced_runs.py` |
@@ -256,10 +262,10 @@ hyperparameter rows.
 | `mopso_cd_lider_poda_archivo_v4.html` | Global archive `Amax=2N`, non-dominated update, exact duplicate first occurrence, pruning crowding distance, leader tournament `q=3`. | `src/binary_mopso_cd/mopso.py` | `mopso.archive_multiplier`, `mopso.leader_tournament_size` | `tests/unit/test_mopso_core.py` |
 | `pbest_Ux_suma_ponderada_dominios_teoricos.html` | `pbest` update by dominance; if incomparable, choose higher `U(x)=(f1+1+f2)/4`; ties keep previous. | `src/binary_mopso_cd/mopso.py` | `mopso.utility_weights` | `tests/unit/test_mopso_core.py` |
 | `estrategia_turbulencia_distilbert_fillmask_v8_formulas_corregidas.html` | DistilBERT receives target word/span and returns up to `Kcand` one-word replacement variants with preliminary top-k `3Kcand`. | `src/binary_mopso_cd/services/turbulence.py`, `src/binary_mopso_cd/router.py` | `models.distilbert.top_k_multiplier`, `mopso.kcand` | `tests/unit/test_router.py` |
-| `estrategia_turbulencia_wordnet_ppdb_v11_formulas_corregidas.html` | Boundary replacement uses WordNet by lemma/POS with PPDB fallback, returning variants only; semantic filtering stays in MOPSO. | `src/binary_mopso_cd/services/turbulence.py`, `src/binary_mopso_cd/mopso.py` | `models.wordnet.enabled`, `models.ppdb.index_path`, `models.ppdb.enabled` | `tests/unit/test_router.py` |
+| `estrategia_turbulencia_wordnet_ppdb_v11_formulas_corregidas.html` | Boundary replacement uses WordNet by lemma/POS with PPDB fallback, returning word variants only; semantic filtering stays in MOPSO. | `src/binary_mopso_cd/services/turbulence.py`, `src/binary_mopso_cd/services/ppdb.py`, `src/binary_mopso_cd/mopso.py` | `models.wordnet.enabled`, `models.ppdb.source_path`, `models.ppdb.index_path`, `models.ppdb.enabled` | `tests/unit/test_router.py`, `tests/unit/test_ppdb_sqlite.py` |
 | `estrategia_filtro_similitud_mmr_topsis_entropy_v5_red_no_negativa.html` | Final selection applies similarity filter, Entropy Method, TOPSIS and MMR with non-negative redundancy. | `src/binary_mopso_cd/selection.py` | `selection.*` | `tests/unit/test_selection.py` |
 | `modelamiento1.png` | Semantic individuals use `role`, `topic`, `action`; objectives maximize semantic fidelity and semantic diversity with SBERT cosine metrics. | `src/binary_mopso_cd/entities.py`, `src/binary_mopso_cd/objectives.py` | `experiment.components`, `models.sbert.*` | `tests/unit/test_objectives.py` |
 | `cf.png` | Fixed iteration stopping criterion with \(G=100\). | `src/binary_mopso_cd/mopso.py`, `src/binary_mopso_cd/runner.py` | `experiment.iterations` | `tests/unit/test_runtime_schedules.py` |
 | `arquitecturaEstrategia.png` | Reference data to initial population, routing/executor, optimizer, archive, final selection and generated dataset outputs. | `src/binary_mopso_cd/runner.py`, `src/binary_mopso_cd/outputs.py` | `runtime.outdir_base`, `selection.enabled` | `tests/integration/test_reduced_runs.py` |
-| `diagrama_optimizador_mopso_cd_corregido.png` | Per generation: update particles, evaluate changed solutions or reuse cache, update `pbest`, update archive, then stop/continue. | `src/binary_mopso_cd/mopso.py` | `mopso.*`, `checkpoint.*` | `tests/integration/test_reduced_runs.py` |
+| `diagrama_optimizador_mopso_cd_corregido.png` | Per generation: update particles, evaluate changed solutions or reuse cache, update `pbest`, update archive, log observational progress, then stop/continue. | `src/binary_mopso_cd/mopso.py`, `src/binary_mopso_cd/progress.py` | `mopso.*`, `checkpoint.*`, `logging.*` | `tests/integration/test_reduced_runs.py`, `tests/unit/test_progress_metrics.py` |
 | `defecto.png` | Defaults `G=100`, `K_runs=3`, `N=100`. | `configs/default.yaml` | `experiment.iterations`, `experiment.runs`, `experiment.n` | `tests/unit/test_runtime_schedules.py` |

@@ -15,6 +15,7 @@ from binary_mopso_cd.component_memory import ComponentMemoryIndex
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
+from binary_mopso_cd.metrics import archive_metrics
 from binary_mopso_cd.monitor import ObservationalMonitor
 from binary_mopso_cd.objectives import evaluate_solutions
 from binary_mopso_cd.router import (
@@ -144,6 +145,7 @@ class BinaryMOPSOCDEngine:
         rng: Random,
         outdir: Path,
         reference_text: str,
+        progress_logger: Any | None = None,
     ):
         self.config = config
         self.router = router
@@ -151,6 +153,7 @@ class BinaryMOPSOCDEngine:
         self.rng = rng
         self.outdir = outdir
         self.reference_text = reference_text
+        self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
         checkpoint = CheckpointSettings.from_config(config)
@@ -200,6 +203,7 @@ class BinaryMOPSOCDEngine:
                     leader = self.archive.select_leader(self.mopso.leader_tournament_size)
                     updated = self._update_particle(particle, pbest[index], leader, generation)
                     next_population.append(updated)
+                modified_count = sum(1 for solution in next_population if solution.changed)
                 comparison_batch = next_population + pbest + self.archive.solutions
                 evaluate_solutions(comparison_batch, self.reference_text, self.executor.embedding_service)
                 next_population = comparison_batch[: len(next_population)]
@@ -213,7 +217,18 @@ class BinaryMOPSOCDEngine:
                 self.archive.update(next_population)
                 self.component_memory.add_solutions(next_population)
                 population = next_population
-                metrics_rows.append(self._generation_metrics(generation, population))
+                row = self._generation_metrics(generation, population, modified_count)
+                metrics_rows.append(row)
+                if self.progress_logger is not None:
+                    self.progress_logger.generation(
+                        generation,
+                        self.config.iterations,
+                        modified_count,
+                        len(population),
+                        len(self.archive.solutions),
+                        row["hypervolume"],
+                        row["spread"],
+                    )
                 monitor_result = self.monitor.observe(generation, population)
                 if self.monitor.enabled:
                     monitor_rows.append(
@@ -454,16 +469,20 @@ class BinaryMOPSOCDEngine:
         )
         return str(self.executor.execute(self.router.route(route))).strip()
 
-    def _generation_metrics(self, generation: int, population: list[Solution]) -> dict[str, Any]:
+    def _generation_metrics(self, generation: int, population: list[Solution], modified_count: int) -> dict[str, Any]:
         f1 = [solution.objectives.f1 for solution in population if solution.objectives]
         f2 = [solution.objectives.f2 for solution in population if solution.objectives]
+        mo_metrics = archive_metrics(self.archive.solutions)
         return {
             "generation": generation,
+            "modified_count": modified_count,
             "mean_f1": float(np.mean(f1)) if f1 else 0.0,
             "max_f1": float(np.max(f1)) if f1 else 0.0,
             "mean_f2": float(np.mean(f2)) if f2 else 0.0,
             "max_f2": float(np.max(f2)) if f2 else 0.0,
             "archive_size": len(self.archive.solutions),
+            "hypervolume": mo_metrics["hypervolume"],
+            "spread": mo_metrics["spread"],
         }
 
     def _write_archive_history(self, generation: int) -> None:

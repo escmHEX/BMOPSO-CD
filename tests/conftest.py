@@ -17,6 +17,7 @@ def test_config() -> RuntimeConfig:
     config.set("runtime.eager_load_models", False)
     config.set("ollama.timeout_seconds", 600)
     config.set("ollama.default_model", "llama3.1:8b")
+    config.set("logging.console", False)
     for task in [
         "semantic_anchor_extraction",
         "semantic_pool_generation",

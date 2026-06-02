@@ -15,6 +15,7 @@ from binary_mopso_cd.router import (
 )
 from binary_mopso_cd.services.embedding import EmbeddingCache, EmbeddingService
 from binary_mopso_cd.services.ollama_client import LLMCallLogger, OllamaChatClient
+from binary_mopso_cd.services.ppdb import PPDBSQLiteIndex, resolve_config_path
 from binary_mopso_cd.services.prompt_renderer import DeterministicPromptRenderer
 from binary_mopso_cd.services.turbulence import DistilBertFillMaskProvider, TurbulenceService, WordNetPPDBProvider
 
@@ -111,8 +112,13 @@ class SemanticTaskExecutor:
 
     def _build_turbulence_provider(self) -> Any:
         distilbert = DistilBertFillMaskProvider(str(self.config.get("models.distilbert.model")))
-        ppdb_path = Path(str(self.config.get("models.ppdb.index_path")))
-        wordnet = WordNetPPDBProvider(ppdb_path, use_wordnet=bool(self.config.get("models.wordnet.enabled", True)))
+        ppdb = None
+        if bool(self.config.get("models.ppdb.enabled", True)):
+            ppdb = PPDBSQLiteIndex(
+                resolve_config_path(str(self.config.get("models.ppdb.index_path"))),
+                resolve_config_path(self.config.get("models.ppdb.source_path")),
+            )
+        wordnet = WordNetPPDBProvider(ppdb, use_wordnet=bool(self.config.get("models.wordnet.enabled", True)))
         return TurbulenceService(distilbert, wordnet, str(self.config.get("models.spacy.model", "en_core_web_sm")))
 
     def _eager_load_real_resources(self) -> None:
