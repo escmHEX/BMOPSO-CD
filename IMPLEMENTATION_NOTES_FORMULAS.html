@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Funciones matematicas e hiperparametros implementados</title>
+  <style>
+    :root {
+      --bg: #101214;
+      --panel: #171b1f;
+      --panel-2: #1f252b;
+      --text: #edf2f7;
+      --muted: #b8c2cc;
+      --line: #39434d;
+      --model: #2f6fed;
+      --router: #7c4dff;
+      --exec: #607d8b;
+      --prompt: #009688;
+      --init: #2e7d32;
+      --obj: #00838f;
+      --mopso: #ef6c00;
+      --archive: #f9a825;
+      --pbest: #c0a000;
+      --turb: #c62828;
+      --select: #8e24aa;
+      --monitor: #455a64;
+      --checkpoint: #795548;
+      --runtime: #546e7a;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.52;
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      margin-top: 34px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 24px;
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+
+    p {
+      color: var(--muted);
+    }
+
+    code {
+      background: #0c0f12;
+      border: 1px solid #2c353e;
+      border-radius: 4px;
+      color: #f6f8fa;
+      padding: 1px 5px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 24px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #242b33;
+      color: #ffffff;
+    }
+
+    tr[class] td:first-child {
+      border-left: 8px solid var(--group);
+      color: #ffffff;
+      font-weight: bold;
+      background: #20262d;
+    }
+
+    .intro {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 6px solid #80cbc4;
+      padding: 14px 16px;
+      margin: 16px 0 24px 0;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin: 16px 0 24px 0;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-left: 7px solid var(--group);
+      padding: 9px 11px;
+      border-radius: 6px;
+    }
+
+    .chip strong {
+      display: block;
+      color: #ffffff;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 8px solid var(--group);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 18px 0;
+    }
+
+    .formula-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 12px;
+    }
+
+    .formula-card {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--group);
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+
+    .formula-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      color: #ffffff;
+    }
+
+    .formula-card p {
+      margin: 8px 0 0 0;
+      font-size: 14px;
+    }
+
+    .math {
+      background: #0c0f12;
+      border: 1px solid #2f3942;
+      border-radius: 6px;
+      margin: 8px 0;
+      padding: 10px 12px;
+      overflow-x: auto;
+    }
+
+    .status-ok {
+      color: #69f0ae;
+      font-weight: bold;
+    }
+
+    .status-diff {
+      color: #ffb74d;
+      font-weight: bold;
+    }
+
+    .warning {
+      background: #261b13;
+      border: 1px solid #704214;
+      border-left: 8px solid #ff9800;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 14px 0 22px 0;
+    }
+
+    .model { --group: var(--model); }
+    .router { --group: var(--router); }
+    .exec { --group: var(--exec); }
+    .prompt { --group: var(--prompt); }
+    .init { --group: var(--init); }
+    .obj { --group: var(--obj); }
+    .mopso { --group: var(--mopso); }
+    .archive { --group: var(--archive); }
+    .pbest { --group: var(--pbest); }
+    .turb { --group: var(--turb); }
+    .select { --group: var(--select); }
+    .monitor { --group: var(--monitor); }
+    .checkpoint { --group: var(--checkpoint); }
+    .runtime { --group: var(--runtime); }
+  </style>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']]
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+<main>
+  <h1>Funciones matematicas e hiperparametros implementados</h1>
+  <p>Documento visual complementario de <code>IMPLEMENTATION_NOTES.md</code>. Usa MathJax para renderizar formulas y colores reales por familia de estrategia.</p>
+
+  <div class="intro">
+    <strong>Convenciones.</strong>
+    \(N\) es el tamano de poblacion, \(G\) es la cantidad de iteraciones del optimizador, \(K_{runs}\) son ejecuciones independientes, \(K_{sel}\) es la cantidad maxima de soluciones seleccionadas, \(K_{cand}\) es la cantidad maxima de variantes candidatas por operador, y \(D\) es la cantidad de componentes semanticas. Los schedules usan indice cero-basado: para la generacion \(g\in\{1,\ldots,G\}\), \(t=g-1\).
+  </div>
+
+  <h2>Leyenda visual de estrategias</h2>
+  <div class="legend">
+    <div class="chip model"><strong>MODEL</strong> Individuo semantico, objetivos y defaults</div>
+    <div class="chip router"><strong>ROUTER</strong> Enrutamiento y sampling LLM</div>
+    <div class="chip exec"><strong>EXEC</strong> Executor, Ollama y embeddings</div>
+    <div class="chip prompt"><strong>PROMPT</strong> Composicion deterministica</div>
+    <div class="chip init"><strong>INIT</strong> Poblacion inicial hibrida</div>
+    <div class="chip obj"><strong>OBJ</strong> Objetivos y cache de embeddings</div>
+    <div class="chip mopso"><strong>MOPSO</strong> Actualizacion MOPSO-CD discreta</div>
+    <div class="chip archive"><strong>ARCHIVE</strong> Archivo externo, CD y lideres</div>
+    <div class="chip pbest"><strong>PBEST</strong> Actualizacion de pbest</div>
+    <div class="chip turb"><strong>TURB</strong> Turbulencia DistilBERT y WordNet/PPDB</div>
+    <div class="chip select"><strong>SELECT</strong> Entropy, TOPSIS y MMR</div>
+    <div class="chip monitor"><strong>MONITOR</strong> Metricas observacionales</div>
+    <div class="chip checkpoint"><strong>CHECKPOINT</strong> Checkpoints diferidos</div>
+  </div>
+
+  <h2>Hallazgos de contraste</h2>
+  <div class="warning">
+    <p><strong>Estas diferencias no se ocultan.</strong> La tabla documenta formulas realmente implementadas y las contrasta con la estrategia.</p>
+    <table>
+      <thead><tr><th>Area</th><th>Formula implementada</th><th>Formula de estrategia</th><th>Estado</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>MOPSO</code> distancia semantica en velocidad</td>
+          <td>\[\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\]</td>
+          <td>\[\Delta_{spec}(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</td>
+          <td class="status-diff">Implementado distinto</td>
+        </tr>
+        <tr>
+          <td><code>SELECT</code> desplazamiento en Entropy Method</td>
+          <td>\[b_{ij}=a_{ij}-\min_i a_{ij}\] con clipping posterior por \(\varepsilon\)</td>
+          <td>\[\delta_j=\max(0,-\min_i a_{ij})+\varepsilon,\qquad b_{ij}=a_{ij}+\delta_j\]</td>
+          <td class="status-diff">Implementado distinto</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Funciones matematicas implementadas</h2>
+
+  <section class="section model">
+    <h3>MODEL - Individuo, defaults y convenciones</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Individuo semantico</h4><div class="math">\[x_i=(x_{i,role},x_{i,topic},x_{i,action}),\qquad x_i=\{(c_j,v_{i,j})\}_{j=1}^{D}\]</div><p>Implementado en <code>SemanticVector</code>.</p></div>
+      <div class="formula-card"><h4>Defaults experimentales</h4><div class="math">\[N=100,\qquad G=100,\qquad K_{runs}=3\]</div><p>Fuente: <code>defecto.png</code> y <code>configs/default.yaml</code>.</p></div>
+    </div>
+  </section>
+
+  <section class="section prompt">
+    <h3>PROMPT - Composicion deterministica</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Renderizado</h4><div class="math">\[P_i=R_S(x_i),\qquad S\subseteq\mathcal{D}\]</div><p>No usa LLM compositor.</p></div>
+      <div class="formula-card"><h4>Costo evitado</h4><div class="math">\[C_{render}^{Template}=0,\qquad \Delta C_{render}=NG-0=NG\]</div><p>Solo normalizacion y concatenacion de strings.</p></div>
+    </div>
+  </section>
+
+  <section class="section router">
+    <h3>ROUTER - Enrutamiento y sampling</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Contrato de routing</h4><div class="math">\[\mathcal{R}(\tau,p)=(a,p',\theta)\]</div><p>\(\tau\): tarea, \(a\): algoritmo, \(\theta\): configuracion.</p></div>
+      <div class="formula-card"><h4>Progreso normalizado</h4><div class="math">\[\rho(t,G)=\begin{cases}0,&G\le1\\ \frac{t}{G-1},&G>1\end{cases},\qquad t\in\{0,\ldots,G-1\}\]</div></div>
+      <div class="formula-card"><h4>Sampling dinamico de influencia</h4><div class="math">\[T(t)=T_{start}-(T_{start}-T_{end})\rho(t,G)\]\[p_{top}(t)=p_{start}-(p_{start}-p_{end})\rho(t,G)\]</div><p>Defaults: \(T=0.70-0.20\rho\), \(p_{top}=0.95-0.05\rho\).</p></div>
+      <div class="formula-card"><h4>Anclas semanticas</h4><div class="math">\[n_y\le6\Rightarrow (T,p_{top})=(0.25,0.90)\]\[n_y>6\Rightarrow (T,p_{top})=(0.20,0.85)\]</div></div>
+      <div class="formula-card"><h4>Pool con baja evidencia</h4><div class="math">\[\operatorname{lowEvidence}=(n_y\le6)\lor(a_c<4)\]</div><p>Despues selecciona \((T,p_{top})\) por componente.</p></div>
+    </div>
+  </section>
+
+  <section class="section exec">
+    <h3>EXEC - Executor, Ollama y embeddings</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Ejecucion LLM</h4><div class="math">\[y=LLM(S_{\tau},U_{\tau}(p');\theta)\]</div><p>Ollama usa <code>stream=false</code> y sin historial conversacional.</p></div>
+      <div class="formula-card"><h4>Embedding</h4><div class="math">\[e=E(s)\in\mathbb{R}^{d_z}\]</div><p>SBERT batchado y cacheado.</p></div>
+      <div class="formula-card"><h4>Generacion sintetica</h4><div class="math">\[G_i=LLM(S_{gen},P_i;\theta_{gen}),\qquad T_{gen}=0.75,\quad p_{gen}=0.95\]</div></div>
+    </div>
+  </section>
+
+  <section class="section init">
+    <h3>INIT - Poblacion inicial hibrida</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Tamano base de pools</h4><div class="math">\[c=\max\left(2,\operatorname{round}\left(\left(\frac{4N}{\prod_{d\in\mathcal{D}}\alpha_d}\right)^{1/D}\right)\right)\]</div></div>
+      <div class="formula-card"><h4>Tamano por componente</h4><div class="math">\[q_d=\lceil\alpha_d c\rceil,\qquad \prod_d q_d\ge4N\]</div><p>Si falta producto, se incrementa segun orden de expansion.</p></div>
+      <div class="formula-card"><h4>Producto minimo</h4><div class="math">\[\prod_{d\in\mathcal{D}}\lvert P_d\rvert\ge3N\]</div></div>
+      <div class="formula-card"><h4>Limite de combinaciones</h4><div class="math">\[M_{cand}=\min\left(\prod_d\lvert P_d\rvert,4N\right)\]</div></div>
+      <div class="formula-card"><h4>Distancia entre prompts</h4><div class="math">\[d_P(P_i,P_j)=1-\operatorname{SimCos}(E(P_i),E(P_j))\]</div></div>
+      <div class="formula-card"><h4>Seleccion voraz max-min</h4><div class="math">\[P^*=\arg\max_{P_i\in C\setminus S}\min_{P_j\in S}d_P(P_i,P_j)\]</div><p>Reduce a \(\min(2N,M_{cand})\).</p></div>
+      <div class="formula-card"><h4>Ranking inicial final</h4><div class="math">\[\operatorname{rank}(x_i)=\operatorname{desc}(f_1(x_i),score_{div,prompt}(x_i))\]</div><p>Selecciona los primeros \(N\) textos validos.</p></div>
+    </div>
+  </section>
+
+  <section class="section obj">
+    <h3>OBJ - Objetivos y cache</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Similitud coseno</h4><div class="math">\[\operatorname{SimCos}(u,v)=\frac{u^\top v}{\lVert u\rVert_2\lVert v\rVert_2}\]</div></div>
+      <div class="formula-card"><h4>Fidelidad semantica</h4><div class="math">\[f_1(x_i)=\operatorname{SimCos}(E(G_i),E(y_{ref}))\]</div></div>
+      <div class="formula-card"><h4>Diversidad semantica</h4><div class="math">\[f_2(x_i)=\frac{1}{N-1}\sum_{j\ne i}\left(1-\operatorname{SimCos}(E(G_i),E(G_j))\right)\]\[N\le1\Rightarrow f_2(x_i)=0\]</div></div>
+      <div class="formula-card"><h4>Matriz vectorizada</h4><div class="math">\[S=ZZ^\top,\qquad D_{ij}=1-S_{ij},\qquad D_{ii}=0\]</div></div>
+      <div class="formula-card"><h4>Clave robusta de cache</h4><div class="math">\[key=\operatorname{SHA256}(\{type,model,version,canonical(text)\})\]</div></div>
+    </div>
+  </section>
+
+  <section class="section mopso">
+    <h3>MOPSO - Actualizacion discreta binarizada</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Componentes activas</h4><div class="math">\[\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen},\qquad F=\lvert\mathcal{D}_{frozen}\rvert,\qquad 0\le F\le D-1\]</div></div>
+      <div class="formula-card"><h4>Distancia semantica en velocidad</h4><div class="math">\[\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\]</div><p class="status-diff">Implementado distinto de la estrategia: \(\Delta_{spec}=(1-\operatorname{SimCos})/2\).</p></div>
+      <div class="formula-card"><h4>Inercia decreciente</h4><div class="math">\[\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\]</div></div>
+      <div class="formula-card"><h4>Turbulencia decreciente</h4><div class="math">\[p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\]</div></div>
+      <div class="formula-card"><h4>Terminos de velocidad</h4><div class="math">\[s_{in}=\omega(t)v_{i,d}^{t}\]\[s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\]\[s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\]\[v_{raw}=s_{in}+s_{cog}+s_{soc}\]</div></div>
+      <div class="formula-card"><h4>Peso de inercia para seleccionar fuente</h4><div class="math">\[a_{in}=\omega(t)\lvert v_{i,d}^{t}\rvert\]</div></div>
+      <div class="formula-card"><h4>Clamp de velocidad</h4><div class="math">\[\hat v_{i,d}^{t+1}=\min(V_{max},\max(-V_{max},v_{raw}))\]</div></div>
+      <div class="formula-card"><h4>Transferencia V-shaped</h4><div class="math">\[q_{pso,i,d}^{t}=\lvert\tanh(\alpha\hat v_{i,d}^{t+1})\rvert\]</div></div>
+      <div class="formula-card"><h4>Probabilidad efectiva</h4><div class="math">\[q_{eff}=1-(1-q_{pso})(1-p_{tur})\]</div></div>
+      <div class="formula-card"><h4>Maximo de cambios</h4><div class="math">\[\lvert M_i^t\rvert\le D_{max}\le\lvert\mathcal{D}_{active}\rvert\]</div></div>
+      <div class="formula-card"><h4>Validacion guiada</h4><div class="math">\[\operatorname{SimCos}(E(c),E(target))>\operatorname{SimCos}(E(current),E(target))\]\[\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\]</div></div>
+      <div class="formula-card"><h4>Validacion de turbulencia</h4><div class="math">\[\tau_{tur}^{min}\le\operatorname{SimCos}(E(c),E(current))\le\tau_{tur}^{max}\]\[\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\]</div></div>
+    </div>
+  </section>
+
+  <section class="section archive">
+    <h3>ARCHIVE - Archivo externo, CD y lideres</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Dominancia de Pareto</h4><div class="math">\[x\succ y\iff f_1(x)\ge f_1(y)\land f_2(x)\ge f_2(y)\land(f_1(x)>f_1(y)\lor f_2(x)>f_2(y))\]</div></div>
+      <div class="formula-card"><h4>Actualizacion de archivo</h4><div class="math">\[A^t=ND(A^{t-1}\cup P^t)\]</div></div>
+      <div class="formula-card"><h4>Tamano maximo</h4><div class="math">\[A_{max}=2N\]</div></div>
+      <div class="formula-card"><h4>Crowding distance</h4><div class="math">\[CD(x_r)\mathrel{+}= \frac{f_j(x_{r+1})-f_j(x_{r-1})}{f_j^{max}-f_j^{min}}\]</div><p>Extremos reciben \(\infty\).</p></div>
+      <div class="formula-card"><h4>Poda</h4><div class="math">\[\lvert A\rvert>A_{max}\Rightarrow \text{remove}\left(\arg\min_x CD(x)\right)\]</div></div>
+      <div class="formula-card"><h4>Torneo de lider</h4><div class="math">\[q_{eff}^{leader}=\min(q,\lvert A\rvert),\qquad q=3\]</div></div>
+    </div>
+  </section>
+
+  <section class="section pbest">
+    <h3>PBEST - Dominancia y utilidad</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Regla de pbest</h4><div class="math">\[x_{actual}\succ pbest_i\Rightarrow pbest_i\leftarrow x_{actual}\]\[pbest_i\succ x_{actual}\Rightarrow pbest_i\leftarrow pbest_i\]\[\text{incomparables}\Rightarrow \arg\max U(x)\]</div></div>
+      <div class="formula-card"><h4>Normalizacion teorica</h4><div class="math">\[\tilde f_1(x)=\frac{f_1(x)+1}{2},\qquad \tilde f_2(x)=\frac{f_2(x)}{2}\]</div></div>
+      <div class="formula-card"><h4>Utilidad auxiliar</h4><div class="math">\[U(x)=w_1\tilde f_1(x)+w_2\tilde f_2(x)\]\[w_1=w_2=0.5\Rightarrow U(x)=\frac{f_1(x)+1+f_2(x)}{4}\]</div></div>
+    </div>
+  </section>
+
+  <section class="section turb">
+    <h3>TURB - DistilBERT y WordNet/PPDB</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Top-k preliminar</h4><div class="math">\[M_{tur}=3K_{cand}\]</div></div>
+      <div class="formula-card"><h4>Condicion de ruta</h4><div class="math">\[L_w\ge1\land R_w\ge1\Rightarrow distilbert\_fill\_mask\]\[\text{otro caso}\Rightarrow wordnet\_ppdb\]</div></div>
+      <div class="formula-card"><h4>Cantidad de variantes</h4><div class="math">\[\lvert C_K\rvert\le K_{cand}\]</div></div>
+    </div>
+  </section>
+
+  <section class="section select">
+    <h3>SELECT - Filtro, Entropy Method, TOPSIS y MMR</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Filtro de similitud</h4><div class="math">\[\mathcal{C}=\{x_i\in\mathcal{F}:\tau_{min}\le F_1(x_i)\le\tau_{max}\}\]</div></div>
+      <div class="formula-card"><h4>Matriz de decision</h4><div class="math">\[A=[a_{ij}]\in\mathbb{R}^{n_f\times2},\qquad a_{i1}=F_1(x_i),\qquad a_{i2}=F_2(x_i)\]</div></div>
+      <div class="formula-card"><h4>Desplazamiento de columnas</h4><div class="math">\[b_{ij}=a_{ij}-\min_i a_{ij}\]</div><p class="status-diff">Implementado distinto: la estrategia suma \(\varepsilon\) al desplazamiento.</p></div>
+      <div class="formula-card"><h4>Pesos por entropia</h4><div class="math">\[p_{ij}=\frac{b_{ij}}{\sum_i b_{ij}},\qquad e_j=-\frac{1}{\ln n_f}\sum_i p_{ij}\ln p_{ij}\]\[d_j=1-e_j,\qquad w_j=\frac{d_j}{\sum_k d_k}\]</div></div>
+      <div class="formula-card"><h4>TOPSIS</h4><div class="math">\[r_{ij}=\frac{a_{ij}}{\sqrt{\sum_i a_{ij}^2}},\qquad v_{ij}=w_jr_{ij}\]\[A_j^+=\max_i v_{ij},\qquad A_j^-=\min_i v_{ij}\]\[C_i=\frac{D_i^-}{D_i^++D_i^-}\]</div></div>
+      <div class="formula-card"><h4>Redundancia no negativa</h4><div class="math">\[\operatorname{Sim}_+(u,v)=\max(0,\operatorname{SimCos}(u,v))\]</div></div>
+      <div class="formula-card"><h4>MMR</h4><div class="math">\[\operatorname{MMR}(x)=\lambda C_x-(1-\lambda)\max_{y\in S}\operatorname{Sim}_+(E(G_x),E(G_y))\]</div></div>
+      <div class="formula-card"><h4>Cantidad final efectiva</h4><div class="math">\[K_{eff}=\min(K_{sel},n_f)\]</div></div>
+    </div>
+  </section>
+
+  <section class="section monitor">
+    <h3>MONITOR - Metricas observacionales</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>KMeans inertia</h4><div class="math">\[I=\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\]</div><p>No alimenta decisiones del optimizador.</p></div>
+      <div class="formula-card"><h4>Entropia de entidades</h4><div class="math">\[H_{ent}=-\sum_{\ell}p_\ell\ln p_\ell\]</div><p>\(p_\ell\) es la frecuencia empirica de la etiqueta de entidad \(\ell\).</p></div>
+    </div>
+  </section>
+
+  <section class="section checkpoint">
+    <h3>CHECKPOINT - Escritura diferida</h3>
+    <div class="formula-grid">
+      <div class="formula-card"><h4>Condicion de guardado</h4><div class="math">\[enabled\land(g\bmod I_{ckpt}=0)\Rightarrow save(g)\]</div><p>Desactivado por defecto.</p></div>
+    </div>
+  </section>
+
+  <h2>Hiperparametros implementados</h2>
+  <table>
+    <thead>
+      <tr><th>Grupo</th><th>Hiperparametro</th><th>Simbolo</th><th>Default</th><th>Config/CLI</th><th>Uso</th><th>Fidelidad</th></tr>
+    </thead>
+    <tbody>
+      <tr class="model"><td>MODEL</td><td>Tamano poblacion</td><td>\(N\)</td><td>100</td><td><code>experiment.n</code>, <code>--n</code></td><td>Particulas/individuos.</td><td class="status-ok">OK</td></tr>
+      <tr class="model"><td>MODEL</td><td>Iteraciones</td><td>\(G\)</td><td>100</td><td><code>experiment.iterations</code>, <code>--iterations</code></td><td>Criterio de termino fijo.</td><td class="status-ok">OK</td></tr>
+      <tr class="model"><td>MODEL</td><td>Ejecuciones independientes</td><td>\(K_{runs}\)</td><td>3</td><td><code>experiment.runs</code>, <code>--runs</code></td><td>Comparabilidad experimental.</td><td class="status-ok">OK</td></tr>
+      <tr class="model"><td>MODEL</td><td>Semilla</td><td>\(seed\)</td><td>42</td><td><code>experiment.seed</code></td><td>Reproducibilidad.</td><td>Configurable</td></tr>
+      <tr class="model"><td>MODEL</td><td>Dominio</td><td>\(D_{gen}\)</td><td>Natural-disaster and emergency scenario messages</td><td><code>experiment.domain</code></td><td>Dominio de prompts/pools.</td><td class="status-ok">OK</td></tr>
+      <tr class="model"><td>MODEL</td><td>Componentes</td><td>\(\mathcal{D}\)</td><td>role, topic, action</td><td><code>experiment.components</code></td><td>Dimensiones semanticas.</td><td class="status-ok">OK</td></tr>
+      <tr class="model"><td>MODEL</td><td>Congeladas</td><td>\(\mathcal{D}_{frozen}\)</td><td>vacio</td><td><code>experiment.frozen_components</code>, <code>--freeze-components</code></td><td>Se omiten en update, siguen en prompt.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Modelo LLM por tarea</td><td>\(LLM_\tau\)</td><td>llama3.1:8b</td><td><code>router.task_models.*</code>, <code>--task-model</code></td><td>Tareas LLM.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Modelo alternativo</td><td>\(LLM_{alt}\)</td><td>qwen3.5:2b</td><td><code>ollama.alternative_model</code></td><td>Opcion configurable.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Umbral texto corto</td><td>\(n_y^{short}\)</td><td>6</td><td><code>router.llm_params.semantic_anchor_extraction.short_word_threshold</code></td><td>Anclas.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Anclas short/long</td><td>\((T,p_{top})\)</td><td>(0.25,0.90)/(0.20,0.85)</td><td><code>router.llm_params.semantic_anchor_extraction</code></td><td>Sampling de anclas.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Pool baja evidencia</td><td>\(n_y^{low},a_c^{low}\)</td><td>6, 4</td><td><code>router.llm_params.semantic_pool_generation</code></td><td>Sampling de pools.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Sampling pools</td><td>\((T,p_{top})\)</td><td>role: (0.68,0.95)/(0.60,0.90); topic: (0.42,0.90)/(0.40,0.89); action: (0.58,0.94)/(0.50,0.90)</td><td><code>router.llm_params.semantic_pool_generation.components</code></td><td>Por componente y evidencia.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Influencia</td><td>\(T_{start},T_{end},p_{start},p_{end}\)</td><td>0.70, 0.50, 0.95, 0.90</td><td><code>router.llm_params.semantic_component_influence_candidates</code></td><td>Schedule de candidatos guiados.</td><td class="status-ok">OK</td></tr>
+      <tr class="router"><td>ROUTER</td><td>Generacion sintetica</td><td>\(T_{gen},p_{gen}\)</td><td>0.75, 0.95</td><td><code>router.llm_params.synthetic_text_generation</code></td><td>LLM final.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Ollama stream</td><td>\(stream\)</td><td>false</td><td><code>ollama.stream</code></td><td>Respuesta no streaming.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Timeout</td><td>\(timeout\)</td><td>120s</td><td><code>ollama.timeout_seconds</code></td><td>Timeout LLM.</td><td>Runtime</td></tr>
+      <tr class="exec"><td>EXEC</td><td>SBERT</td><td>\(E\)</td><td>all-MiniLM-L6-v2</td><td><code>models.sbert.default</code>, <code>--bert-model</code></td><td>Embeddings.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Batch embeddings</td><td>\(B_E\)</td><td>64</td><td><code>models.sbert.batch_size</code></td><td>Batching SBERT.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Version cache</td><td>\(v_E\)</td><td>sbert-v1</td><td><code>models.sbert.config_version</code></td><td>Clave robusta.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>DistilBERT</td><td>\(MLM\)</td><td>distilbert-base-uncased</td><td><code>models.distilbert.model</code></td><td>Fill-mask.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Top-k multiplier</td><td>\(m_{tur}\)</td><td>3</td><td><code>models.distilbert.top_k_multiplier</code></td><td>\(M_{tur}=3K_{cand}\).</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>spaCy</td><td>\(NLP\)</td><td>en_core_web_sm</td><td><code>models.spacy.model</code></td><td>Monitor.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>WordNet/PPDB</td><td>\(WN,PPDB\)</td><td>true/true</td><td><code>models.wordnet.enabled</code>, <code>models.ppdb.*</code></td><td>Turbulencia fallback.</td><td class="status-ok">OK</td></tr>
+      <tr class="init"><td>INIT</td><td>Alphas</td><td>\(\alpha_{role},\alpha_{topic},\alpha_{action}\)</td><td>1.4, 1.0, 1.2</td><td><code>semantic_components.rules.*.alpha</code></td><td>Tamano de pools.</td><td class="status-ok">OK</td></tr>
+      <tr class="init"><td>INIT</td><td>Max words</td><td>\(W_{role},W_{topic},W_{action}\)</td><td>6, 8, 6</td><td><code>semantic_components.rules.*.max_words</code></td><td>Validacion de componentes.</td><td class="status-ok">OK</td></tr>
+      <tr class="init"><td>INIT</td><td>Orden expansion</td><td>\(O_{exp}\)</td><td>role, action, topic</td><td><code>semantic_components.expansion_order</code></td><td>Expansion de pools.</td><td class="status-ok">OK</td></tr>
+      <tr class="init"><td>INIT</td><td>Multiplicadores</td><td>\(M_{cand}/N,M_{min}/N,M_{red}/N\)</td><td>4, 3, 2</td><td><code>initialization.*_multiplier</code></td><td>4N, 3N, 2N.</td><td class="status-ok">OK</td></tr>
+      <tr class="init"><td>INIT</td><td>Sentencias</td><td>\(S_{min},S_{max}\)</td><td>1, 4</td><td><code>initialization.generated_sentences_*</code></td><td>Validacion textos iniciales.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Archivo</td><td>\(A_{max}/N\)</td><td>2</td><td><code>mopso.archive_multiplier</code></td><td>\(A_{max}=2N\).</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Torneo lider</td><td>\(q\)</td><td>3</td><td><code>mopso.leader_tournament_size</code></td><td>Lider por CD.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Cambios maximos</td><td>\(D_{max}\)</td><td>1</td><td><code>mopso.dmax</code></td><td>Componentes por particula/generacion.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Candidatos</td><td>\(K_{cand}\)</td><td>5</td><td><code>mopso.kcand</code></td><td>Variantes por operador.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Inercia</td><td>\(\omega_{max},\omega_{min}\)</td><td>0.9, 0.4</td><td><code>mopso.omega_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Cognitivo/social</td><td>\(c_1,c_2\)</td><td>1.5, 1.5</td><td><code>mopso.c1</code>, <code>mopso.c2</code></td><td>Velocidad.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Clamp y escala</td><td>\(V_{max},\alpha\)</td><td>4.0, 0.5</td><td><code>mopso.vmax</code>, <code>mopso.alpha</code></td><td>Transferencia V-shaped.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Turbulencia</td><td>\(p_{tur}^{max},p_{tur}^{min}\)</td><td>0.05, 0.01</td><td><code>mopso.p_tur_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Retries</td><td>\(K_{retry}\)</td><td>0</td><td><code>mopso.k_retry</code></td><td>Sin reintentos extra.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Duplicados</td><td>\(\tau_{dup}\)</td><td>0.92</td><td><code>mopso.tau_dup</code></td><td>Filtro near-duplicate.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Fidelidad turbulencia</td><td>\(\tau_{tur}^{min},\tau_{tur}^{max}\)</td><td>0.65, 0.90</td><td><code>mopso.tau_tur_*</code></td><td>Rango local de reemplazo.</td><td class="status-ok">OK</td></tr>
+      <tr class="pbest"><td>PBEST</td><td>Pesos utilidad</td><td>\(w_1,w_2\)</td><td>0.5, 0.5</td><td><code>mopso.utility_weights</code></td><td>Desempate pbest.</td><td class="status-ok">OK</td></tr>
+      <tr class="select"><td>SELECT</td><td>Seleccion activa</td><td>\(sel\)</td><td>true</td><td><code>selection.enabled</code>, <code>--disable-selection</code></td><td>Post-procesamiento final.</td><td class="status-ok">OK</td></tr>
+      <tr class="select"><td>SELECT</td><td>Cantidad final</td><td>\(K_{sel}\)</td><td>5</td><td><code>selection.k</code></td><td>Soluciones finales.</td><td class="status-ok">OK</td></tr>
+      <tr class="select"><td>SELECT</td><td>Filtro F1</td><td>\(\tau_{min},\tau_{max}\)</td><td>0.20, 0.94</td><td><code>selection.tau_min</code>, <code>selection.tau_max</code></td><td>Filtro de similitud.</td><td class="status-ok">OK</td></tr>
+      <tr class="select"><td>SELECT</td><td>MMR lambda</td><td>\(\lambda_{MMR}\)</td><td>0.35</td><td><code>selection.lambda_mmr</code></td><td>Relevancia vs redundancia.</td><td class="status-ok">OK</td></tr>
+      <tr class="select"><td>SELECT</td><td>Entropy epsilon</td><td>\(\varepsilon\)</td><td>0.0001</td><td><code>selection.epsilon</code></td><td>Clipping implementado; la estrategia lo usa en shift.</td><td class="status-diff">Implementado distinto</td></tr>
+      <tr class="monitor"><td>MONITOR</td><td>Monitor</td><td>\(mon\)</td><td>false</td><td><code>monitor.enabled</code>, <code>--enable-monitor</code></td><td>Metricas externas.</td><td class="status-ok">OK</td></tr>
+      <tr class="monitor"><td>MONITOR</td><td>KMeans clusters</td><td>\(k_{km}\)</td><td>3</td><td><code>monitor.kmeans_clusters</code></td><td>Inertia.</td><td class="status-ok">OK</td></tr>
+      <tr class="checkpoint"><td>CHECKPOINT</td><td>Checkpoint activo</td><td>\(ckpt\)</td><td>false</td><td><code>checkpoint.enabled</code></td><td>Desactivado por defecto.</td><td class="status-ok">OK</td></tr>
+      <tr class="checkpoint"><td>CHECKPOINT</td><td>Intervalo</td><td>\(I_{ckpt}\)</td><td>1</td><td><code>checkpoint.interval</code>, <code>--checkpoint-every</code></td><td>Cadencia si esta activo.</td><td class="status-ok">OK</td></tr>
+      <tr class="runtime"><td>RUNTIME</td><td>Output base</td><td>\(outdir\)</td><td>exec</td><td><code>runtime.outdir_base</code>, <code>--outdir-base</code></td><td>Carpetas EVOLMD-MO.</td><td class="status-ok">OK</td></tr>
+      <tr class="runtime"><td>RUNTIME</td><td>Resume</td><td>\(resume\)</td><td>null</td><td><code>runtime.resume_from</code>, <code>--resume-from</code></td><td>Reanudar corrida.</td><td class="status-ok">OK</td></tr>
+      <tr class="runtime"><td>RUNTIME</td><td>Cache embeddings</td><td>\(cache_E\)</td><td>embedding_cache.json</td><td><code>runtime.embedding_cache_file</code></td><td>Cache persistente.</td><td class="status-ok">OK</td></tr>
+      <tr class="runtime"><td>RUNTIME</td><td>Carga eager</td><td>\(load_{eager}\)</td><td>true</td><td><code>runtime.eager_load_models</code></td><td>Carga recursos pesados una vez.</td><td class="status-ok">OK</td></tr>
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
