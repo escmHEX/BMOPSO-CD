@@ -248,21 +248,21 @@
 
   <h2>Hallazgos de contraste</h2>
   <div class="warning">
-    <p><strong>Estas diferencias no se ocultan.</strong> La tabla documenta formulas realmente implementadas y las contrasta con la estrategia.</p>
+    <p><strong>Correcciones aplicadas.</strong> La tabla documenta las dos formulas corregidas y confirma que coinciden con la estrategia normativa.</p>
     <table>
       <thead><tr><th>Area</th><th>Formula implementada</th><th>Formula de estrategia</th><th>Estado</th></tr></thead>
       <tbody>
         <tr>
           <td><code>MOPSO</code> distancia semantica en velocidad</td>
-          <td>\[\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\]</td>
-          <td>\[\Delta_{spec}(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</td>
-          <td class="status-diff">Implementado distinto</td>
+          <td>\[\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</td>
+          <td>\[\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</td>
+          <td class="status-ok">OK</td>
         </tr>
         <tr>
           <td><code>SELECT</code> desplazamiento en Entropy Method</td>
-          <td>\[b_{ij}=a_{ij}-\min_i a_{ij}\] con clipping posterior por \(\varepsilon\)</td>
           <td>\[\delta_j=\max(0,-\min_i a_{ij})+\varepsilon,\qquad b_{ij}=a_{ij}+\delta_j\]</td>
-          <td class="status-diff">Implementado distinto</td>
+          <td>\[\delta_j=\max(0,-\min_i a_{ij})+\varepsilon,\qquad b_{ij}=a_{ij}+\delta_j\]</td>
+          <td class="status-ok">OK</td>
         </tr>
       </tbody>
     </table>
@@ -334,7 +334,7 @@
     <h3>MOPSO - Actualizacion discreta binarizada</h3>
     <div class="formula-grid">
       <div class="formula-card"><h4>Componentes activas</h4><div class="math">\[\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen},\qquad F=\lvert\mathcal{D}_{frozen}\rvert,\qquad 0\le F\le D-1\]</div></div>
-      <div class="formula-card"><h4>Distancia semantica en velocidad</h4><div class="math">\[\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\]</div><p class="status-diff">Implementado distinto de la estrategia: \(\Delta_{spec}=(1-\operatorname{SimCos})/2\).</p></div>
+      <div class="formula-card"><h4>Distancia semantica en velocidad</h4><div class="math">\[\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</div><p class="status-ok">OK: coincide con la estrategia MOPSO-CD.</p></div>
       <div class="formula-card"><h4>Inercia decreciente</h4><div class="math">\[\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\]</div></div>
       <div class="formula-card"><h4>Turbulencia decreciente</h4><div class="math">\[p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\]</div></div>
       <div class="formula-card"><h4>Terminos de velocidad</h4><div class="math">\[s_{in}=\omega(t)v_{i,d}^{t}\]\[s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\]\[s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\]\[v_{raw}=s_{in}+s_{cog}+s_{soc}\]</div></div>
@@ -383,7 +383,7 @@
     <div class="formula-grid">
       <div class="formula-card"><h4>Filtro de similitud</h4><div class="math">\[\mathcal{C}=\{x_i\in\mathcal{F}:\tau_{min}\le F_1(x_i)\le\tau_{max}\}\]</div></div>
       <div class="formula-card"><h4>Matriz de decision</h4><div class="math">\[A=[a_{ij}]\in\mathbb{R}^{n_f\times2},\qquad a_{i1}=F_1(x_i),\qquad a_{i2}=F_2(x_i)\]</div></div>
-      <div class="formula-card"><h4>Desplazamiento de columnas</h4><div class="math">\[b_{ij}=a_{ij}-\min_i a_{ij}\]</div><p class="status-diff">Implementado distinto: la estrategia suma \(\varepsilon\) al desplazamiento.</p></div>
+      <div class="formula-card"><h4>Desplazamiento de columnas</h4><div class="math">\[\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\]\[b_{ij}=a_{ij}+\delta_j\]</div><p class="status-ok">OK: \(\varepsilon\) entra en el desplazamiento positivo.</p></div>
       <div class="formula-card"><h4>Pesos por entropia</h4><div class="math">\[p_{ij}=\frac{b_{ij}}{\sum_i b_{ij}},\qquad e_j=-\frac{1}{\ln n_f}\sum_i p_{ij}\ln p_{ij}\]\[d_j=1-e_j,\qquad w_j=\frac{d_j}{\sum_k d_k}\]</div></div>
       <div class="formula-card"><h4>TOPSIS</h4><div class="math">\[r_{ij}=\frac{a_{ij}}{\sqrt{\sum_i a_{ij}^2}},\qquad v_{ij}=w_jr_{ij}\]\[A_j^+=\max_i v_{ij},\qquad A_j^-=\min_i v_{ij}\]\[C_i=\frac{D_i^-}{D_i^++D_i^-}\]</div></div>
       <div class="formula-card"><h4>Redundancia no negativa</h4><div class="math">\[\operatorname{Sim}_+(u,v)=\max(0,\operatorname{SimCos}(u,v))\]</div></div>
@@ -458,7 +458,7 @@
       <tr class="select"><td>SELECT</td><td>Cantidad final</td><td>\(K_{sel}\)</td><td>5</td><td><code>selection.k</code></td><td>Soluciones finales.</td><td class="status-ok">OK</td></tr>
       <tr class="select"><td>SELECT</td><td>Filtro F1</td><td>\(\tau_{min},\tau_{max}\)</td><td>0.20, 0.94</td><td><code>selection.tau_min</code>, <code>selection.tau_max</code></td><td>Filtro de similitud.</td><td class="status-ok">OK</td></tr>
       <tr class="select"><td>SELECT</td><td>MMR lambda</td><td>\(\lambda_{MMR}\)</td><td>0.35</td><td><code>selection.lambda_mmr</code></td><td>Relevancia vs redundancia.</td><td class="status-ok">OK</td></tr>
-      <tr class="select"><td>SELECT</td><td>Entropy epsilon</td><td>\(\varepsilon\)</td><td>0.0001</td><td><code>selection.epsilon</code></td><td>Clipping implementado; la estrategia lo usa en shift.</td><td class="status-diff">Implementado distinto</td></tr>
+      <tr class="select"><td>SELECT</td><td>Entropy epsilon</td><td>\(\varepsilon\)</td><td>0.0001</td><td><code>selection.epsilon</code></td><td>Desplazamiento positivo para Entropy Method.</td><td class="status-ok">OK</td></tr>
       <tr class="monitor"><td>MONITOR</td><td>Monitor</td><td>\(mon\)</td><td>false</td><td><code>monitor.enabled</code>, <code>--enable-monitor</code></td><td>Metricas externas.</td><td class="status-ok">OK</td></tr>
       <tr class="monitor"><td>MONITOR</td><td>KMeans clusters</td><td>\(k_{km}\)</td><td>3</td><td><code>monitor.kmeans_clusters</code></td><td>Inertia.</td><td class="status-ok">OK</td></tr>
       <tr class="checkpoint"><td>CHECKPOINT</td><td>Checkpoint activo</td><td>\(ckpt\)</td><td>false</td><td><code>checkpoint.enabled</code></td><td>Desactivado por defecto.</td><td class="status-ok">OK</td></tr>

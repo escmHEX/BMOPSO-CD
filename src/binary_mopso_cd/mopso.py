@@ -41,6 +41,10 @@ def utility(objectives: Objectives, weights: dict[str, float] | None = None) -> 
     return float(weights.get("f1", 0.5) * f1_norm + weights.get("f2", 0.5) * f2_norm)
 
 
+def semantic_velocity_delta(left_embedding: np.ndarray, right_embedding: np.ndarray) -> float:
+    return (1.0 - float(left_embedding @ right_embedding)) / 2.0
+
+
 def crowding_distance(solutions: list[Solution]) -> dict[str, float]:
     distances = {solution.solution_id: 0.0 for solution in solutions}
     if len(solutions) <= 2:
@@ -240,8 +244,8 @@ class BinaryMOPSOCDEngine:
             pbest_value = pbest.vector.components[component]
             leader_value = leader.vector.components[component]
             embeddings = self.executor.embedding_service.encode([current, pbest_value, leader_value], text_type="component")
-            delta_p = 1.0 - float(embeddings[0] @ embeddings[1])
-            delta_l = 1.0 - float(embeddings[0] @ embeddings[2])
+            delta_p = semantic_velocity_delta(embeddings[0], embeddings[1])
+            delta_l = semantic_velocity_delta(embeddings[0], embeddings[2])
             r1 = self.rng.random()
             r2 = self.rng.random()
             previous_velocity = float(particle.velocity.get(component, 0.0))

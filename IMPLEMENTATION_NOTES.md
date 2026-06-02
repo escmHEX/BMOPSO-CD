@@ -85,16 +85,15 @@ hyperparameter rows.
 - Unless otherwise stated, \(E(s)\) is the SBERT embedding of text \(s\). The
   implementation normalizes embeddings in `EmbeddingService`, so dot products
   between encoded vectors are cosine similarities.
-- Rows marked `Implementado distinto` document a real discrepancy found during
-  the contrast between strategy and code. They are not claims of methodological
-  equivalence.
+- Fidelity statuses document the formula currently executed by the code after
+  contrast against the normative HTML strategies.
 
 ## Contrast Findings
 
-| Area | Implemented formula | Strategy formula | Review status |
+| Area | Corrected formula | Strategy formula | Review status |
 | --- | --- | --- | --- |
-| `MOPSO` semantic distance in velocity | \(\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\) | \(\Delta_{spec}(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\) | Implementado distinto; documented explicitly in the formulas table. |
-| `SELECT` Entropy Method column shift | \(b_{ij}=a_{ij}-\min_i a_{ij}\), followed by probability clipping with \(\varepsilon\) | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\) | Implementado distinto; documented explicitly in the formulas and hyperparameters tables. |
+| `MOPSO` semantic distance in velocity | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\) | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\) | OK |
+| `SELECT` Entropy Method column shift | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\) | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\) | OK |
 
 ## Funciones matemáticas implementadas
 
@@ -125,10 +124,10 @@ hyperparameter rows.
 | `OBJ` | Vectorized distance matrix | \(D_{ij}=1-S_{ij}\), where \(S=ZZ^\top\) for normalized embeddings \(Z\), and \(D_{ii}=0\). | `semantic_diversity_scores`; no repeated text-by-text embedding calls. | OK |
 | `OBJ` | Embedding cache key | \(key=\operatorname{SHA256}(\{type,model,version,canonical(text)\})\). | `EmbeddingCacheKey.to_digest`; `models.sbert.config_version`. | OK |
 | `MOPSO` | Active components | \(\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen}\), \(F=\lvert\mathcal{D}_{frozen}\rvert\), \(0\le F\le D-1\). | `MOPSOOptimizer.active_components`; `experiment.frozen_components`. | OK |
-| `MOPSO` | Semantic distance in velocity | Implemented: \(\Delta_{impl}(a,b)=1-\operatorname{SimCos}(E(a),E(b))\). Strategy expected: \(\Delta_{spec}(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\). | `mopso._update_particle`, `delta_p`, `delta_l`. | Implementado distinto |
+| `MOPSO` | Semantic distance in velocity | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\). | `semantic_velocity_delta`; used by `mopso._update_particle` for `delta_p` and `delta_l`. | OK |
 | `MOPSO` | Inertia schedule | \(\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\). Defaults: \(\omega_{max}=0.9,\omega_{min}=0.4\). | `mopso._update_particle`; `mopso.omega_max`, `mopso.omega_min`. | OK |
 | `MOPSO` | Turbulence schedule | \(p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\). Defaults: \(0.05\to0.01\). | `mopso._update_particle`; `mopso.p_tur_max`, `mopso.p_tur_min`. | OK |
-| `MOPSO` | Velocity terms | \(s_{in}=\omega(t)v_{i,d}^{t}\); \(s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\); \(s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\); \(v_{raw}=s_{in}+s_{cog}+s_{soc}\). | `mopso._update_particle`; `c1`, `c2`. | OK except \(\Delta\) scale noted above |
+| `MOPSO` | Velocity terms | \(s_{in}=\omega(t)v_{i,d}^{t}\); \(s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\); \(s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\); \(v_{raw}=s_{in}+s_{cog}+s_{soc}\). | `mopso._update_particle`; `c1`, `c2`. | OK |
 | `MOPSO` | Inertia selection weight | \(a_{in}=\omega(t)\lvert v_{i,d}^{t}\rvert\). | `s_in_weight`; used only for move-source weighting. | OK |
 | `MOPSO` | Velocity clamp | \(\hat v_{i,d}^{t+1}=\min(V_{max},\max(-V_{max},v_{raw}))\). | `mopso._update_particle`; `mopso.vmax`. | OK |
 | `MOPSO` | V-shaped transfer | \(q_{pso,i,d}^{t}=T_\alpha(\hat v)=\lvert\tanh(\alpha\hat v)\rvert\). | `math.tanh`; `mopso.alpha=0.5`. | OK |
@@ -150,8 +149,8 @@ hyperparameter rows.
 | `TURB` | Variant count | \(\lvert C_K\rvert\le K_{cand}\). | `TurbulenceService`; `mopso.kcand=5`. | OK |
 | `SELECT` | Similarity filter | \(\mathcal{C}=\{x_i\in\mathcal{F}:\tau_{min}\le F_1(x_i)\le\tau_{max}\}\). | `rank_solutions`; `selection.tau_min`, `selection.tau_max`. | OK |
 | `SELECT` | Decision matrix | \(A=[a_{ij}]\in\mathbb{R}^{n_f\times2}\), \(a_{i1}=F_1(x_i)\), \(a_{i2}=F_2(x_i)\). | `rank_solutions`. | OK |
-| `SELECT` | Entropy column shift | Implemented: \(b_{ij}=a_{ij}-\min_i a_{ij}\), then probabilities are clipped by \(\varepsilon\). Strategy expected: \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\). | `entropy_weights`. | Implementado distinto |
-| `SELECT` | Entropy weights | \(p_{ij}=b_{ij}/\sum_i b_{ij}\); \(e_j=-\frac{1}{\ln n_f}\sum_i p_{ij}\ln p_{ij}\); \(d_j=1-e_j\); \(w_j=d_j/\sum_k d_k\). | `entropy_weights`; uniform weights if \(n_f\le1\) or total divergence is zero. | OK after shift noted above |
+| `SELECT` | Entropy column shift | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\). | `entropy_weights`. | OK |
+| `SELECT` | Entropy weights | \(p_{ij}=b_{ij}/\sum_i b_{ij}\); \(e_j=-\frac{1}{\ln n_f}\sum_i p_{ij}\ln p_{ij}\); \(d_j=1-e_j\); \(w_j=d_j/\sum_k d_k\). | `entropy_weights`; uniform weights if \(n_f\le1\) or total divergence is zero. | OK |
 | `SELECT` | TOPSIS normalization and score | \(r_{ij}=a_{ij}/\sqrt{\sum_i a_{ij}^2}\); \(v_{ij}=w_jr_{ij}\); \(A_j^+=\max_i v_{ij}\); \(A_j^-=\min_i v_{ij}\); \(C_i=\frac{D_i^-}{D_i^++D_i^-}\). | `topsis_scores`; zero denominators are set to 1. | OK |
 | `SELECT` | Non-negative redundancy | \(\operatorname{Sim}_+(u,v)=\max(0,\operatorname{SimCos}(u,v))\). | `mmr_select`; embeddings for generated texts. | OK |
 | `SELECT` | MMR score | \(\operatorname{MMR}(x)=\lambda C_x-(1-\lambda)\max_{y\in S}\operatorname{Sim}_+(E(G_x),E(G_y))\). | `mmr_select`; `selection.lambda_mmr=0.35`. | OK |
@@ -233,7 +232,7 @@ hyperparameter rows.
 | `SELECT` | Similarity lower bound | \(\tau_{min}\) | 0.20 | `selection.tau_min` | Minimum \(F_1\) for final selection. | OK |
 | `SELECT` | Similarity upper bound | \(\tau_{max}\) | 0.94 | `selection.tau_max` | Maximum \(F_1\) for final selection. | OK |
 | `SELECT` | MMR lambda | \(\lambda_{MMR}\) | 0.35 | `selection.lambda_mmr` | Tradeoff between TOPSIS relevance and redundancy penalty. | OK |
-| `SELECT` | Entropy epsilon | \(\varepsilon\) | 0.0001 | `selection.epsilon` | Used in implemented probability clipping; strategy uses it in column shift. | Implementado distinto |
+| `SELECT` | Entropy epsilon | \(\varepsilon\) | 0.0001 | `selection.epsilon` | Positive displacement for Entropy Method column shift. | OK |
 | `MONITOR` | Monitor enabled | \(mon\) | `false` | `monitor.enabled`, `--enable-monitor` | Observational metrics only; no optimizer feedback. | OK |
 | `MONITOR` | KMeans clusters | \(k_{km}\) | 3 | `monitor.kmeans_clusters` | Cluster count for external inertia metric. | OK |
 | `CHECKPOINT` | Checkpoint enabled | \(ckpt\) | `false` | `checkpoint.enabled` | Deferred checkpoints disabled by default. | OK |

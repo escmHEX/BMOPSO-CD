@@ -20,15 +20,12 @@ def entropy_weights(matrix: np.ndarray, epsilon: float = 1e-4) -> np.ndarray:
     n, m = matrix.shape
     if n <= 1:
         return np.ones(m) / m
-    shifted = matrix - matrix.min(axis=0, keepdims=True)
+    column_shift = np.maximum(0.0, -matrix.min(axis=0, keepdims=True)) + epsilon
+    shifted = matrix + column_shift
     sums = shifted.sum(axis=0, keepdims=True)
-    zero_cols = sums == 0
-    sums[zero_cols] = 1.0
     probabilities = shifted / sums
-    probabilities = np.clip(probabilities, epsilon, None)
     entropies = -(probabilities * np.log(probabilities)).sum(axis=0) / math.log(n)
     divergence = 1.0 - entropies
-    divergence[zero_cols.flatten()] = 0.0
     total = divergence.sum()
     if total <= 0:
         return np.ones(m) / m
@@ -91,4 +88,3 @@ def mmr_select(
         winner.selected = True
         selected.append(winner)
     return selected
-

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import math
+
+import numpy as np
+
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
-from binary_mopso_cd.selection import mmr_select, rank_solutions
+from binary_mopso_cd.selection import entropy_weights, mmr_select, rank_solutions
 
 
 def make_solution(f1: float, f2: float, idx: int) -> Solution:
@@ -24,3 +28,22 @@ def test_selection_filters_ranks_and_mmr_selects(real_embedding_service):
     assert len(ranked) == 2
     assert len(selected) == 2
     assert all(item.selected for item in selected)
+
+
+def test_entropy_weights_use_strategy_column_shift_with_epsilon():
+    matrix = np.asarray(
+        [
+            [0.20, 0.10],
+            [0.40, 0.80],
+            [0.90, 0.20],
+        ],
+        dtype=float,
+    )
+    epsilon = 1e-4
+    shifted = matrix + (np.maximum(0.0, -matrix.min(axis=0, keepdims=True)) + epsilon)
+    probabilities = shifted / shifted.sum(axis=0, keepdims=True)
+    entropies = -(probabilities * np.log(probabilities)).sum(axis=0) / math.log(matrix.shape[0])
+    divergence = 1.0 - entropies
+    expected = divergence / divergence.sum()
+
+    assert np.allclose(entropy_weights(matrix, epsilon=epsilon), expected)
