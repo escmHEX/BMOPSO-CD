@@ -204,7 +204,7 @@ hyperparameter rows.
 | `EXEC` | DistilBERT top-k multiplier | \(m_{tur}\) | 3 | `models.distilbert.top_k_multiplier` | Computes \(M_{tur}=3K_{cand}\). | OK |
 | `EXEC` | spaCy model | \(NLP\) | `en_core_web_sm` | `models.spacy.model` | Entity entropy monitor only. | OK |
 | `EXEC` | WordNet enabled | \(WN\) | `true` | `models.wordnet.enabled` | WordNet replacement source. | OK |
-| `EXEC` | PPDB enabled/path | \(PPDB\) | `true`, `{venv}/var/binary_mopso_cd/ppdb_index.sqlite` | `models.ppdb.enabled`, `models.ppdb.source_path`, `models.ppdb.index_path` | SQLite PPDB fallback replacement source, built once inside the active Python environment. | OK |
+| `EXEC` | PPDB enabled/path | \(PPDB\) | `true`, source `data/ppdb/ppdb-2.0-s-all`, index `{venv}/var/binary_mopso_cd/ppdb_index.sqlite` | `models.ppdb.enabled`, `models.ppdb.source_path`, `models.ppdb.index_path` | SQLite PPDB fallback replacement source, built once inside the active Python environment. | OK |
 | `INIT` | Component alpha: role | \(\alpha_{role}\) | 1.4 | `semantic_components.rules.role.alpha` | Pool size weighting for role. | OK |
 | `INIT` | Component alpha: topic | \(\alpha_{topic}\) | 1.0 | `semantic_components.rules.topic.alpha` | Pool size weighting for topic. | OK |
 | `INIT` | Component alpha: action | \(\alpha_{action}\) | 1.2 | `semantic_components.rules.action.alpha` | Pool size weighting for action. | OK |

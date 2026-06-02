@@ -30,6 +30,7 @@ caches/
 
 data/generated/
 data/external/
+data/ppdb/
 data/turbulence/*.json
 data/turbulence/*.sqlite
 data/turbulence/*.sqlite-*

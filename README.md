@@ -27,10 +27,10 @@ active Python environment:
 {venv}/var/binary_mopso_cd/ppdb_index.sqlite
 ```
 
-The default PPDB source is the sibling experiments folder:
+The default PPDB source is:
 
 ```text
-../Experimentos/data/external/ppdb/ppdb-2.0-s-all
+data/ppdb/ppdb-2.0-s-all
 ```
 
 Use `--ppdb-source` or `--ppdb-index` if your paths differ. The raw PPDB file and
@@ -54,7 +54,7 @@ Useful flags:
 --disable-selection
 --router-heuristic semantic_pool_generation=false
 --task-model synthetic_text_generation=qwen3.5:2b
---ppdb-source ../Experimentos/data/external/ppdb/ppdb-2.0-s-all
+--ppdb-source data/ppdb/ppdb-2.0-s-all
 --ppdb-index .venv/var/binary_mopso_cd/ppdb_index.sqlite
 --enable-checkpoint
 --checkpoint-every 1

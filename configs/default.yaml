@@ -44,7 +44,7 @@ models:
     enabled: true
   ppdb:
     enabled: true
-    source_path: "../Experimentos/data/external/ppdb/ppdb-2.0-s-all"
+    source_path: "data/ppdb/ppdb-2.0-s-all"
     index_path: "{venv}/var/binary_mopso_cd/ppdb_index.sqlite"
 
 logging:
