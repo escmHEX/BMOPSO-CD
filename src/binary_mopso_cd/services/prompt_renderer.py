@@ -1,28 +1,66 @@
 from __future__ import annotations
 
+import re
+
 from binary_mopso_cd.utils import canonical_text
 
 
 class DeterministicPromptRenderer:
     def render(self, components: dict[str, str], domain: str) -> str:
-        normalized = {name: value.strip() for name, value in components.items() if value and value.strip()}
-        role = normalized.get("role")
-        topic = normalized.get("topic")
-        action = normalized.get("action")
-        if role and topic and action:
+        normalized = {
+            name: self._normalize_slot(value) for name, value in components.items() if value and self._normalize_slot(value)
+        }
+        names = set(normalized)
+        if names == {"role"}:
             return (
-                f"From the perspective of {role}, write a {domain} message "
-                f"about {topic} that should {action}."
+                "Generate a short natural-disaster scenario message using the following semantic component: "
+                f"role = {normalized['role']}. The generated message must follow the role."
             )
-        if role and topic:
-            return f"From the perspective of {role}, write a {domain} message about {topic}."
-        if topic and action:
-            return f"Write a {domain} message about {topic} that should {action}."
-        if role and action:
-            return f"From the perspective of {role}, write a {domain} message that should {action}."
-        constraints = "; ".join(f"{name}: {value}" for name, value in sorted(normalized.items()))
-        return f"Write a {domain} message that combines these semantic constraints: {constraints}."
+        if names == {"topic"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic component: "
+                f"topic = {normalized['topic']}. The generated message must address the topic."
+            )
+        if names == {"action"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic component: "
+                f"action = {normalized['action']}. The generated message must satisfy the action."
+            )
+        if names == {"role", "topic"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic components: "
+                f"role = {normalized['role']}; topic = {normalized['topic']}. "
+                "The generated message must follow the role and address the topic."
+            )
+        if names == {"role", "action"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic components: "
+                f"role = {normalized['role']}; action = {normalized['action']}. "
+                "The generated message must follow the role and satisfy the action."
+            )
+        if names == {"topic", "action"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic components: "
+                f"topic = {normalized['topic']}; action = {normalized['action']}. "
+                "The generated message must address the topic and satisfy the action."
+            )
+        if names == {"role", "topic", "action"}:
+            return (
+                "Generate a short natural-disaster scenario message using the following semantic components: "
+                f"role = {normalized['role']}; topic = {normalized['topic']}; action = {normalized['action']}. "
+                "The generated message must follow the role, address the topic, and satisfy the action."
+            )
+        if not normalized:
+            raise ValueError("Deterministic prompt rendering requires at least one component")
+        component_list = "; ".join(f"{name} = {value}" for name, value in normalized.items())
+        return (
+            "Generate a short natural-disaster scenario message using the following semantic components: "
+            f"{component_list}. The generated message must satisfy all provided components."
+        )
 
     def normalize_component(self, text: str) -> str:
         return canonical_text(text)
 
+    def _normalize_slot(self, text: str) -> str:
+        value = re.sub(r"\s+", " ", str(text).strip())
+        return value.strip("\"'` ")

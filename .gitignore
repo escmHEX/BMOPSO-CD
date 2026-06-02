@@ -16,7 +16,7 @@ build/
 dist/
 *.egg-info/
 
-exec/
+exec*/
 logs/
 outputs/
 checkpoints/

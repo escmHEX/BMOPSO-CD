@@ -93,9 +93,13 @@ class EmbeddingService:
             return np.empty((0, 0), dtype=float)
         keys = [self.cache.key(text_type, self.model_name, self.config_version, text) for text in texts]
         result: list[list[float] | None] = [self.cache.get(key) for key in keys]
-        missing_indices = [idx for idx, value in enumerate(result) if value is None]
-        if missing_indices:
-            missing_texts = [texts[idx] for idx in missing_indices]
+        missing_by_key: dict[str, list[int]] = {}
+        for idx, value in enumerate(result):
+            if value is None:
+                missing_by_key.setdefault(keys[idx], []).append(idx)
+        if missing_by_key:
+            first_missing_indices = [indices[0] for indices in missing_by_key.values()]
+            missing_texts = [texts[idx] for idx in first_missing_indices]
             embeddings = self.model.encode(
                 missing_texts,
                 batch_size=self.batch_size,
@@ -103,7 +107,7 @@ class EmbeddingService:
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )
-            for idx, embedding in zip(missing_indices, embeddings, strict=True):
+            for idx, embedding in zip(first_missing_indices, embeddings, strict=True):
                 vector = [float(x) for x in embedding]
                 metadata = {
                     "text_type": text_type,
@@ -113,7 +117,8 @@ class EmbeddingService:
                     "canonical_text": canonical_text(texts[idx]),
                 }
                 self.cache.set(keys[idx], vector, metadata)
-                result[idx] = vector
+                for duplicate_idx in missing_by_key[keys[idx]]:
+                    result[duplicate_idx] = vector
         return np.asarray(result, dtype=float)
 
     def similarity(self, left: str, right: str, text_type: str = "component") -> float:
@@ -121,36 +126,3 @@ class EmbeddingService:
         if embeddings.shape[0] < 2:
             return 0.0
         return float(np.dot(embeddings[0], embeddings[1]))
-
-
-class FakeEmbeddingModel:
-    def encode(
-        self,
-        texts: list[str],
-        batch_size: int = 64,
-        convert_to_numpy: bool = True,
-        normalize_embeddings: bool = True,
-        show_progress_bar: bool = False,
-    ) -> np.ndarray:
-        vectors = []
-        for text in texts:
-            digest = stable_digest({"text": canonical_text(text)})
-            values = [int(digest[i : i + 8], 16) / 0xFFFFFFFF for i in range(0, 64, 8)]
-            vector = np.asarray(values, dtype=float)
-            if normalize_embeddings:
-                norm = np.linalg.norm(vector)
-                if norm:
-                    vector = vector / norm
-            vectors.append(vector)
-        return np.asarray(vectors, dtype=float)
-
-
-def fake_embedding_service(config_version: str = "test-v1") -> EmbeddingService:
-    return EmbeddingService(
-        model_name="fake-sbert",
-        resolved_model_name="fake-sbert",
-        batch_size=16,
-        config_version=config_version,
-        cache=EmbeddingCache(),
-        model_factory=lambda _: FakeEmbeddingModel(),
-    )

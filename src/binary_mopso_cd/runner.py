@@ -37,8 +37,11 @@ class ExperimentRunner:
         executor = SemanticTaskExecutor(config, outdir=outdir)
         resume_path = config.get("runtime.resume_from")
         checkpoint_payload = self._load_checkpoint(Path(resume_path)) if resume_path else None
-        if checkpoint_payload and "embedding_cache" in checkpoint_payload:
-            executor.embedding_service.cache.restore(checkpoint_payload["embedding_cache"])
+        if checkpoint_payload:
+            cache_name = str(checkpoint_payload.get("embedding_cache_file", config.get("runtime.embedding_cache_file")))
+            cache_path = Path(resume_path).parent.parent / cache_name
+            if cache_path.exists():
+                executor.embedding_service.cache.load(cache_path)
         rng = rng_from_text(config.seed, checkpoint_payload.get("rng_state") if checkpoint_payload else None)
         if checkpoint_payload:
             initial_population = [solution_from_dict(item) for item in checkpoint_payload["population"]]

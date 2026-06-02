@@ -8,12 +8,15 @@ experiment:
   frozen_components: []
 
 runtime:
-  backend: "real"
   outdir_base: "exec"
-  checkpoint_every: 1
   resume_from: null
   embedding_cache_file: "embedding_cache.json"
   eager_load_models: true
+
+checkpoint:
+  enabled: false
+  interval: 1
+  directory: "checkpoints"
 
 ollama:
   host: "http://127.0.0.1:11434"
@@ -21,6 +24,7 @@ ollama:
   default_model: "llama3.1:8b"
   alternative_model: "qwen3.5:2b"
   stream: false
+  think: false
   speculative_decoding_enabled: false
 
 models:
@@ -55,11 +59,67 @@ router:
     semantic_pool_expansion: true
     semantic_component_influence_candidates: true
     word_replacement_candidates: true
+  llm_params:
+    disabled_default:
+      temperature: 0.60
+      top_p: 0.90
+    semantic_anchor_extraction:
+      short_word_threshold: 6
+      short:
+        temperature: 0.25
+        top_p: 0.90
+      long:
+        temperature: 0.20
+        top_p: 0.85
+    semantic_pool_generation:
+      low_evidence_word_threshold: 6
+      low_evidence_anchor_threshold: 4
+      components:
+        role:
+          low_evidence:
+            temperature: 0.68
+            top_p: 0.95
+          normal:
+            temperature: 0.60
+            top_p: 0.90
+        topic:
+          low_evidence:
+            temperature: 0.42
+            top_p: 0.90
+          normal:
+            temperature: 0.40
+            top_p: 0.89
+        action:
+          low_evidence:
+            temperature: 0.58
+            top_p: 0.94
+          normal:
+            temperature: 0.50
+            top_p: 0.90
+    semantic_component_influence_candidates:
+      temperature_start: 0.70
+      temperature_end: 0.50
+      top_p_start: 0.95
+      top_p_end: 0.90
+    synthetic_text_generation:
+      temperature: 0.75
+      top_p: 0.95
+
+semantic_components:
+  order: ["role", "topic", "action"]
+  expansion_order: ["role", "action", "topic"]
+  rules:
+    role:
+      alpha: 1.4
+      max_words: 6
+    topic:
+      alpha: 1.0
+      max_words: 8
+    action:
+      alpha: 1.2
+      max_words: 6
 
 initialization:
-  alpha_role: 1.4
-  alpha_action: 1.2
-  alpha_topic: 1.0
   candidate_multiplier: 4
   min_product_multiplier: 3
   prompt_reduction_multiplier: 2

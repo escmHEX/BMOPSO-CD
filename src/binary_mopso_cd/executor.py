@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from binary_mopso_cd.config import RuntimeConfig
-from binary_mopso_cd.llm_prompts import build_messages, parse_task_result
+from binary_mopso_cd.llm_prompts import build_messages, parse_task_result, response_format_for_task
 from binary_mopso_cd.router import (
     ALG_DISTILBERT,
     ALG_LLM,
@@ -13,10 +13,10 @@ from binary_mopso_cd.router import (
     ALG_WORDNET_PPDB,
     ExecutionTask,
 )
-from binary_mopso_cd.services.embedding import EmbeddingCache, EmbeddingService, fake_embedding_service
-from binary_mopso_cd.services.ollama_client import FakeLLMClient, LLMCallLogger, OllamaChatClient
+from binary_mopso_cd.services.embedding import EmbeddingCache, EmbeddingService
+from binary_mopso_cd.services.ollama_client import LLMCallLogger, OllamaChatClient
 from binary_mopso_cd.services.prompt_renderer import DeterministicPromptRenderer
-from binary_mopso_cd.services.turbulence import DistilBertFillMaskProvider, FakeTurbulenceProvider, WordNetPPDBProvider
+from binary_mopso_cd.services.turbulence import DistilBertFillMaskProvider, TurbulenceService, WordNetPPDBProvider
 
 
 class SemanticTaskExecutor:
@@ -32,11 +32,10 @@ class SemanticTaskExecutor:
         self.config = config
         self.outdir = outdir
         self.prompt_renderer = prompt_renderer or DeterministicPromptRenderer()
-        backend = str(config.get("runtime.backend", "real"))
-        self.embedding_service = embedding_service or self._build_embedding_service(backend, outdir)
-        self.llm_client = llm_client or self._build_llm_client(backend, outdir)
-        self.turbulence_provider = turbulence_provider or self._build_turbulence_provider(backend)
-        if backend == "real" and bool(config.get("runtime.eager_load_models", True)):
+        self.embedding_service = embedding_service or self._build_embedding_service(outdir)
+        self.llm_client = llm_client or self._build_llm_client(outdir)
+        self.turbulence_provider = turbulence_provider or self._build_turbulence_provider()
+        if bool(config.get("runtime.eager_load_models", True)):
             self._eager_load_real_resources()
 
     def execute(self, task: ExecutionTask) -> Any:
@@ -80,15 +79,14 @@ class SemanticTaskExecutor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             options=options,
+            response_format=response_format_for_task(task.semantic_task),
         )
         return parse_task_result(task.semantic_task, raw)
 
     def save_caches(self) -> None:
         self.embedding_service.cache.save()
 
-    def _build_embedding_service(self, backend: str, outdir: Path | None) -> EmbeddingService:
-        if backend == "fake":
-            return fake_embedding_service(str(self.config.get("models.sbert.config_version", "test-v1")))
+    def _build_embedding_service(self, outdir: Path | None) -> EmbeddingService:
         model_alias = str(self.config.get("models.sbert.default"))
         resolved = self.config.get(f"models.sbert.alternatives.{model_alias}", model_alias)
         cache_path = None
@@ -102,35 +100,20 @@ class SemanticTaskExecutor:
             cache=EmbeddingCache(cache_path),
         )
 
-    def _build_llm_client(self, backend: str, outdir: Path | None) -> Any:
+    def _build_llm_client(self, outdir: Path | None) -> Any:
         logger = LLMCallLogger(None if outdir is None else outdir / "llm_calls.jsonl")
-        if backend == "fake":
-            return FakeLLMClient(logger)
         return OllamaChatClient(
             host=str(self.config.get("ollama.host")),
             timeout_seconds=int(self.config.get("ollama.timeout_seconds", 120)),
+            think=self.config.get("ollama.think", False),
             logger=logger,
         )
 
-    def _build_turbulence_provider(self, backend: str) -> Any:
-        if backend == "fake":
-            return FakeTurbulenceProvider()
+    def _build_turbulence_provider(self) -> Any:
         distilbert = DistilBertFillMaskProvider(str(self.config.get("models.distilbert.model")))
         ppdb_path = Path(str(self.config.get("models.ppdb.index_path")))
         wordnet = WordNetPPDBProvider(ppdb_path, use_wordnet=bool(self.config.get("models.wordnet.enabled", True)))
-
-        class Provider:
-            def __init__(self):
-                self.distilbert = distilbert
-                self.wordnet = wordnet
-
-            def distilbert_candidates(self, text: str, target_index: int, preliminary_top_k: int, max_variants: int):
-                return self.distilbert.candidates(text, target_index, preliminary_top_k, max_variants)
-
-            def wordnet_candidates(self, text: str, target_index: int, max_variants: int, use_ppdb: bool = True):
-                return self.wordnet.candidates(text, target_index, max_variants, use_ppdb)
-
-        return Provider()
+        return TurbulenceService(distilbert, wordnet, str(self.config.get("models.spacy.model", "en_core_web_sm")))
 
     def _eager_load_real_resources(self) -> None:
         _ = self.embedding_service.model
@@ -138,3 +121,5 @@ class SemanticTaskExecutor:
             _ = self.turbulence_provider.distilbert.pipeline
         if hasattr(self.turbulence_provider, "wordnet"):
             _ = self.turbulence_provider.wordnet.wordnet
+        if hasattr(self.turbulence_provider, "nlp"):
+            _ = self.turbulence_provider.nlp

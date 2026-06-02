@@ -23,9 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable-selection", action="store_true", help="Disable final selection module.")
     parser.add_argument("--router-heuristic", action="append", default=[], help="name=true|false override.")
     parser.add_argument("--task-model", action="append", default=[], help="task=model override.")
+    parser.add_argument("--enable-checkpoint", action="store_true", help="Enable deferred optimizer checkpoints.")
     parser.add_argument("--checkpoint-every", type=int, default=None, help="Checkpoint interval in generations.")
+    parser.add_argument("--checkpoint-interval", type=int, default=None, help="Alias for --checkpoint-every.")
     parser.add_argument("--resume-from", type=Path, default=None, help="Checkpoint to resume from.")
-    parser.add_argument("--fake-models", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -65,12 +66,14 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
             raise ValueError(f"Expected task=model assignment, got {assignment!r}")
         task, model = assignment.split("=", 1)
         config.set(f"router.task_models.{task.strip()}", model.strip())
-    if args.checkpoint_every is not None:
-        config.set("runtime.checkpoint_every", args.checkpoint_every)
+    if args.enable_checkpoint:
+        config.set("checkpoint.enabled", True)
+    checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else args.checkpoint_every
+    if checkpoint_interval is not None:
+        config.set("checkpoint.enabled", True)
+        config.set("checkpoint.interval", checkpoint_interval)
     if args.resume_from is not None:
         config.set("runtime.resume_from", str(args.resume_from))
-    if args.fake_models:
-        config.set("runtime.backend", "fake")
     config.validate()
     return config
 
@@ -84,4 +87,3 @@ def main(argv: list[str] | None = None) -> int:
     for outdir in outdirs:
         print(outdir)
     return 0
-

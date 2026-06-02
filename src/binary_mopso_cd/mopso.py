@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import numpy as np
 
+from binary_mopso_cd.checkpoint import CheckpointManager
+from binary_mopso_cd.component_memory import ComponentMemoryIndex
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
@@ -24,7 +26,8 @@ from binary_mopso_cd.router import (
     SemanticRouter,
 )
 from binary_mopso_cd.services.turbulence import tokenize_component
-from binary_mopso_cd.utils import canonical_text, rng_to_text, word_count
+from binary_mopso_cd.settings import CheckpointSettings, ComponentSettings, MOPSOSettings
+from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, word_count
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -104,16 +107,12 @@ class ExternalArchive:
         return self.rng.choice(tied)
 
     def _deduplicate(self, candidates: list[Solution]) -> list[Solution]:
-        best_by_key: dict[tuple[tuple[str, str], ...], Solution] = {}
+        first_by_key: dict[tuple[tuple[str, str], ...], Solution] = {}
         for solution in candidates:
             key = solution.vector.signature()
-            previous = best_by_key.get(key)
-            if previous is None:
-                best_by_key[key] = solution
-                continue
-            if solution.objectives and previous.objectives and utility(solution.objectives) > utility(previous.objectives):
-                best_by_key[key] = solution
-        return list(best_by_key.values())
+            if key not in first_by_key:
+                first_by_key[key] = solution
+        return list(first_by_key.values())
 
 
 class PBestUpdater:
@@ -148,13 +147,22 @@ class BinaryMOPSOCDEngine:
         self.rng = rng
         self.outdir = outdir
         self.reference_text = reference_text
-        self.archive = ExternalArchive(max_size=int(config.get("mopso.archive_multiplier", 2)) * config.n, rng=rng)
-        self.pbest_updater = PBestUpdater(dict(config.get("mopso.utility_weights", {"f1": 0.5, "f2": 0.5})))
-        self.component_memory: dict[str, list[str]] = {component: [] for component in config.components}
+        self.components = ComponentSettings.from_config(config)
+        self.mopso = MOPSOSettings.from_config(config)
+        checkpoint = CheckpointSettings.from_config(config)
+        self.archive = ExternalArchive(max_size=self.mopso.archive_multiplier * config.n, rng=rng)
+        self.pbest_updater = PBestUpdater(self.mopso.utility_weights)
+        self.component_memory = ComponentMemoryIndex(self.components.order, executor.embedding_service)
         self.monitor = ObservationalMonitor(
             enabled=bool(config.get("monitor.enabled", False)),
             spacy_model=str(config.get("models.spacy.model", "en_core_web_sm")),
             kmeans_clusters=int(config.get("monitor.kmeans_clusters", 3)),
+        )
+        self.checkpoints = CheckpointManager(
+            enabled=checkpoint.enabled,
+            outdir=outdir,
+            directory_name=checkpoint.directory,
+            interval=checkpoint.interval,
         )
 
     def run(
@@ -172,40 +180,48 @@ class BinaryMOPSOCDEngine:
         else:
             self.archive.update(population)
         if component_memory is not None:
-            self.component_memory = {key: list(values) for key, values in component_memory.items()}
+            self.component_memory = ComponentMemoryIndex.from_snapshot(
+                self.components.order,
+                self.executor.embedding_service,
+                component_memory,
+            )
         else:
-            self._remember_components(population)
+            self.component_memory.add_solutions(population)
         metrics_rows: list[dict[str, Any]] = []
         monitor_rows: list[dict[str, Any]] = []
-        for generation in range(start_generation + 1, self.config.iterations + 1):
-            next_population = []
-            for index, particle in enumerate(population):
-                leader = self.archive.select_leader(int(self.config.get("mopso.leader_tournament_size", 3)))
-                updated = self._update_particle(particle, pbest[index], leader, generation)
-                next_population.append(updated)
-            comparison_batch = next_population + pbest + self.archive.solutions
-            evaluate_solutions(comparison_batch, self.reference_text, self.executor.embedding_service)
-            next_population = comparison_batch[: len(next_population)]
-            pbest_candidates = comparison_batch[len(next_population) : len(next_population) + len(pbest)]
-            archive_revalued = comparison_batch[len(next_population) + len(pbest) :]
-            self.archive.solutions = archive_revalued
-            pbest = [self.pbest_updater.choose(current, previous) for current, previous in zip(next_population, pbest_candidates, strict=True)]
-            self.archive.update(next_population)
-            self._remember_components(next_population)
-            population = next_population
-            metrics_rows.append(self._generation_metrics(generation, population))
-            monitor_result = self.monitor.observe(generation, population)
-            if self.monitor.enabled:
-                monitor_rows.append(
-                    {
-                        **monitor_result.metrics,
-                        "monitor_overhead_seconds": monitor_result.overhead_seconds,
-                    }
-                )
-            self._write_archive_history(generation)
-            if generation % int(self.config.get("runtime.checkpoint_every", 1)) == 0:
-                self._save_checkpoint(generation, population, pbest, metrics_rows)
-            self.executor.save_caches()
+        try:
+            for generation in range(start_generation + 1, self.config.iterations + 1):
+                next_population = []
+                for index, particle in enumerate(population):
+                    leader = self.archive.select_leader(self.mopso.leader_tournament_size)
+                    updated = self._update_particle(particle, pbest[index], leader, generation)
+                    next_population.append(updated)
+                comparison_batch = next_population + pbest + self.archive.solutions
+                evaluate_solutions(comparison_batch, self.reference_text, self.executor.embedding_service)
+                next_population = comparison_batch[: len(next_population)]
+                pbest_candidates = comparison_batch[len(next_population) : len(next_population) + len(pbest)]
+                archive_revalued = comparison_batch[len(next_population) + len(pbest) :]
+                self.archive.solutions = archive_revalued
+                pbest = [
+                    self.pbest_updater.choose(current, previous)
+                    for current, previous in zip(next_population, pbest_candidates, strict=True)
+                ]
+                self.archive.update(next_population)
+                self.component_memory.add_solutions(next_population)
+                population = next_population
+                metrics_rows.append(self._generation_metrics(generation, population))
+                monitor_result = self.monitor.observe(generation, population)
+                if self.monitor.enabled:
+                    monitor_rows.append(
+                        {
+                            **monitor_result.metrics,
+                            "monitor_overhead_seconds": monitor_result.overhead_seconds,
+                        }
+                    )
+                self._write_archive_history(generation)
+                self.checkpoints.submit(generation, self._checkpoint_payload(generation, population, pbest, metrics_rows))
+        finally:
+            self.checkpoints.close()
         self._write_metrics(metrics_rows)
         self._write_monitor_metrics(monitor_rows)
         return population, self.archive
@@ -213,33 +229,31 @@ class BinaryMOPSOCDEngine:
     def _update_particle(self, particle: Solution, pbest: Solution, leader: Solution, generation: int) -> Solution:
         updated = particle.clone(keep_id=True)
         updated.changed = False
-        active_components = [name for name in self.config.components if name not in self.config.frozen_components]
-        candidates: list[tuple[str, str, str]] = []
-        rho = 0.0 if self.config.iterations <= 1 else generation / max(self.config.iterations - 1, 1)
-        omega = float(self.config.get("mopso.omega_max", 0.9)) - (
-            float(self.config.get("mopso.omega_max", 0.9)) - float(self.config.get("mopso.omega_min", 0.4))
-        ) * rho
-        p_tur = float(self.config.get("mopso.p_tur_max", 0.05)) - (
-            float(self.config.get("mopso.p_tur_max", 0.05)) - float(self.config.get("mopso.p_tur_min", 0.01))
-        ) * rho
+        active_components = self.components.active
+        candidates: list[tuple[str, str, float]] = []
+        schedule_index = generation - 1
+        rho = progress_ratio(schedule_index, self.config.iterations)
+        omega = self.mopso.omega_max - (self.mopso.omega_max - self.mopso.omega_min) * rho
+        p_tur = self.mopso.p_tur_max - (self.mopso.p_tur_max - self.mopso.p_tur_min) * rho
         for component in active_components:
             current = particle.vector.components[component]
             pbest_value = pbest.vector.components[component]
             leader_value = leader.vector.components[component]
-            delta_p = 1.0 - self.executor.embedding_service.similarity(current, pbest_value, "component")
-            delta_l = 1.0 - self.executor.embedding_service.similarity(current, leader_value, "component")
+            embeddings = self.executor.embedding_service.encode([current, pbest_value, leader_value], text_type="component")
+            delta_p = 1.0 - float(embeddings[0] @ embeddings[1])
+            delta_l = 1.0 - float(embeddings[0] @ embeddings[2])
             r1 = self.rng.random()
             r2 = self.rng.random()
             previous_velocity = float(particle.velocity.get(component, 0.0))
             s_in_velocity = omega * previous_velocity
             s_in_weight = omega * abs(previous_velocity)
-            s_cog = float(self.config.get("mopso.c1", 1.5)) * r1 * delta_p
-            s_soc = float(self.config.get("mopso.c2", 1.5)) * r2 * delta_l
+            s_cog = self.mopso.c1 * r1 * delta_p
+            s_soc = self.mopso.c2 * r2 * delta_l
             raw_velocity = s_in_velocity + s_cog + s_soc
-            vmax = float(self.config.get("mopso.vmax", 4.0))
-            velocity = max(-vmax, min(vmax, raw_velocity))
+            velocity = max(-self.mopso.vmax, min(self.mopso.vmax, raw_velocity))
             updated.velocity[component] = velocity
-            q_pso = abs(math.tanh(float(self.config.get("mopso.alpha", 0.5)) * velocity))
+            q_pso = abs(math.tanh(self.mopso.alpha * velocity))
+            q_eff = 1.0 - (1.0 - q_pso) * (1.0 - p_tur)
             roll = self.rng.random()
             mode = None
             if roll < p_tur:
@@ -247,18 +261,18 @@ class BinaryMOPSOCDEngine:
             elif self.rng.random() < q_pso:
                 mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle)
             if mode:
-                candidates.append((component, mode, ""))
-        max_changes = min(int(self.config.get("mopso.dmax", 1)), len(candidates))
+                candidates.append((component, mode, q_eff))
+        max_changes = min(self.mopso.dmax, len(candidates))
         if len(candidates) > max_changes:
-            candidates = self.rng.sample(candidates, max_changes)
-        for component, mode, _ in candidates:
+            candidates = weighted_sample_without_replacement(candidates, max_changes, self.rng)
+        for component, mode, _weight in candidates:
             replacement = self._candidate_for_mode(component, mode, updated, pbest, leader, generation)
             if replacement:
                 updated.vector.components[component] = replacement
                 updated.changed = True
                 if mode in {"cognitive", "social"}:
                     updated.last_guided_move[component] = replacement
-        for component in self.config.frozen_components:
+        for component in self.components.frozen:
             updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
             updated.velocity[component] = particle.velocity.get(component, 0.0)
         if updated.changed:
@@ -303,7 +317,7 @@ class BinaryMOPSOCDEngine:
         current = particle.vector.components[component]
         if mode == "inertia":
             candidate = particle.last_guided_move.get(component)
-            return candidate if candidate and self._valid_candidate(component, current, candidate, None, "inertia") else None
+            return self._select_inertia_candidate(component, current, [candidate] if candidate else [])
         if mode == "turbulence":
             return self._turbulence_candidate(component, current)
         target = pbest.vector.components[component] if mode == "cognitive" else leader.vector.components[component]
@@ -316,16 +330,13 @@ class BinaryMOPSOCDEngine:
                 "current": current,
                 "target": target,
                 "reference_text": self.reference_text,
-                "max_candidates": int(self.config.get("mopso.kcand", 5)),
-                "iteration": generation,
+                "max_candidates": self.mopso.kcand,
+                "iteration": generation - 1,
                 "iterations": self.config.iterations,
             },
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
-        valid = [value for value in raw_candidates if self._valid_candidate(component, current, value, target, mode)]
-        if not valid:
-            return None
-        return max(valid, key=lambda value: self.executor.embedding_service.similarity(value, target, "component"))
+        return self._select_guided_candidate(component, current, target, raw_candidates)
 
     def _turbulence_candidate(self, component: str, current: str) -> str | None:
         tokens = tokenize_component(current)
@@ -340,47 +351,86 @@ class BinaryMOPSOCDEngine:
                 "text": current,
                 "tokens": tokens,
                 "target_index": target_index,
-                "max_variants": int(self.config.get("mopso.kcand", 5)),
+                "max_variants": self.mopso.kcand,
             },
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
-        valid = [value for value in raw_candidates if self._valid_candidate(component, current, value, None, "turbulence")]
-        if not valid:
-            return None
-        return max(valid, key=lambda value: self.executor.embedding_service.similarity(value, current, "component"))
+        return self._select_turbulence_candidate(component, current, raw_candidates)
 
-    def _valid_candidate(
+    def _select_inertia_candidate(self, component: str, current: str, raw_candidates: list[str]) -> str | None:
+        candidates = self._basic_candidates(component, current, raw_candidates, forbidden=None)
+        if not candidates:
+            return None
+        candidate_embeddings = self.executor.embedding_service.encode(candidates, text_type="component")
+        duplicate_sims = self.component_memory.max_similarity(component, candidate_embeddings)
+        valid_indices = np.where(duplicate_sims < self.mopso.tau_dup)[0]
+        if valid_indices.size == 0:
+            return None
+        return candidates[int(valid_indices[0])]
+
+    def _select_guided_candidate(
         self,
         component: str,
         current: str,
-        candidate: str,
-        target: str | None,
-        mode: str,
-    ) -> bool:
-        normalized = canonical_text(candidate)
-        if not normalized or normalized == canonical_text(current):
-            return False
-        if word_count(normalized) < 2 or word_count(normalized) > 8:
-            return False
-        if target is not None and normalized == canonical_text(target):
-            return False
-        memory = self.component_memory.get(component, [])
-        if memory:
-            similarities = [
-                self.executor.embedding_service.similarity(candidate, remembered, "component") for remembered in memory
-            ]
-            if max(similarities) >= float(self.config.get("mopso.tau_dup", 0.92)):
-                return False
-        if target is not None:
-            before = self.executor.embedding_service.similarity(current, target, "component")
-            after = self.executor.embedding_service.similarity(candidate, target, "component")
-            return after > before
-        if mode == "turbulence":
-            sim = self.executor.embedding_service.similarity(candidate, current, "component")
-            return float(self.config.get("mopso.tau_tur_min", 0.65)) <= sim <= float(
-                self.config.get("mopso.tau_tur_max", 0.90)
-            )
-        return True
+        target: str,
+        raw_candidates: list[str],
+    ) -> str | None:
+        candidates = self._basic_candidates(component, current, raw_candidates, forbidden=target)
+        if not candidates:
+            return None
+        candidate_embeddings = self.executor.embedding_service.encode(candidates, text_type="component")
+        duplicate_sims = self.component_memory.max_similarity(component, candidate_embeddings)
+        target_embeddings = self.executor.embedding_service.encode([current, target], text_type="component")
+        before = float(target_embeddings[0] @ target_embeddings[1])
+        target_sims = candidate_embeddings @ target_embeddings[1]
+        valid_indices = np.where((duplicate_sims < self.mopso.tau_dup) & (target_sims > before))[0]
+        if valid_indices.size == 0:
+            return None
+        best_idx = int(valid_indices[np.argmax(target_sims[valid_indices])])
+        return candidates[best_idx]
+
+    def _select_turbulence_candidate(self, component: str, current: str, raw_candidates: list[str]) -> str | None:
+        candidates = self._basic_candidates(component, current, raw_candidates, forbidden=None)
+        if not candidates:
+            return None
+        candidate_embeddings = self.executor.embedding_service.encode(candidates, text_type="component")
+        duplicate_sims = self.component_memory.max_similarity(component, candidate_embeddings)
+        current_embedding = self.executor.embedding_service.encode([current], text_type="component")[0]
+        current_sims = candidate_embeddings @ current_embedding
+        valid_indices = np.where(
+            (duplicate_sims < self.mopso.tau_dup)
+            & (current_sims >= self.mopso.tau_tur_min)
+            & (current_sims <= self.mopso.tau_tur_max)
+        )[0]
+        if valid_indices.size == 0:
+            return None
+        best_idx = int(valid_indices[np.argmax(current_sims[valid_indices])])
+        return candidates[best_idx]
+
+    def _basic_candidates(
+        self,
+        component: str,
+        current: str,
+        raw_candidates: list[str],
+        forbidden: str | None,
+    ) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        current_key = canonical_text(current)
+        forbidden_key = canonical_text(forbidden) if forbidden is not None else None
+        max_words = self.components.max_words[component]
+        for candidate in raw_candidates:
+            text = str(candidate).strip()
+            key = canonical_text(text)
+            if not key or key in seen or key == current_key:
+                continue
+            if forbidden_key is not None and key == forbidden_key:
+                continue
+            if word_count(text) > max_words:
+                continue
+            seen.add(key)
+            result.append(text)
+        return result
 
     def _render_prompt(self, vector: SemanticVector) -> str:
         route = RouteTask(
@@ -399,13 +449,6 @@ class BinaryMOPSOCDEngine:
             {"prompt": prompt, "reference_text": self.reference_text},
         )
         return str(self.executor.execute(self.router.route(route))).strip()
-
-    def _remember_components(self, solutions: list[Solution]) -> None:
-        for solution in solutions:
-            for component, value in solution.vector.components.items():
-                key = canonical_text(value)
-                if key and all(canonical_text(existing) != key for existing in self.component_memory[component]):
-                    self.component_memory[component].append(value)
 
     def _generation_metrics(self, generation: int, population: list[Solution]) -> dict[str, Any]:
         f1 = [solution.objectives.f1 for solution in population if solution.objectives]
@@ -445,25 +488,46 @@ class BinaryMOPSOCDEngine:
 
         pd.DataFrame(rows).to_csv(self.outdir / "monitor_metrics.csv", index=False)
 
-    def _save_checkpoint(
+    def _checkpoint_payload(
         self,
         generation: int,
         population: list[Solution],
         pbest: list[Solution],
         metrics_rows: list[dict[str, Any]],
-    ) -> None:
-        checkpoint_dir = self.outdir / "checkpoints"
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        payload = {
+    ) -> dict[str, Any]:
+        return {
             "generation": generation,
             "population": [solution_to_dict(solution) for solution in population],
             "pbest": [solution_to_dict(solution) for solution in pbest],
             "archive": [solution_to_dict(solution) for solution in self.archive.solutions],
-            "component_memory": self.component_memory,
+            "component_memory": self.component_memory.to_snapshot(),
             "rng_state": rng_to_text(self.rng),
             "metrics": metrics_rows,
-            "embedding_cache": self.executor.embedding_service.cache.to_dict(),
+            "embedding_cache_file": str(self.config.get("runtime.embedding_cache_file", "embedding_cache.json")),
+            "embedding_cache_size": self.executor.embedding_service.cache.size,
             "llm_log_file": "llm_calls.jsonl",
         }
-        with (checkpoint_dir / f"generation_{generation:04d}.json").open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def weighted_sample_without_replacement(
+    candidates: list[tuple[str, str, float]],
+    count: int,
+    rng: Random,
+) -> list[tuple[str, str, float]]:
+    pool = list(candidates)
+    selected: list[tuple[str, str, float]] = []
+    while pool and len(selected) < count:
+        total = sum(max(item[2], 0.0) for item in pool)
+        if total <= 0.0:
+            choice = rng.randrange(len(pool))
+        else:
+            roll = rng.random() * total
+            cumulative = 0.0
+            choice = len(pool) - 1
+            for idx, item in enumerate(pool):
+                cumulative += max(item[2], 0.0)
+                if roll <= cumulative:
+                    choice = idx
+                    break
+        selected.append(pool.pop(choice))
+    return selected

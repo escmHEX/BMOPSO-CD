@@ -48,6 +48,16 @@ def cosine_matrix(embeddings: np.ndarray) -> np.ndarray:
     return normalized @ normalized.T
 
 
+def progress_ratio(index: int, total: int) -> float:
+    if total <= 1:
+        if index < 0:
+            raise ValueError("progress index must be non-negative")
+        return 0.0
+    if index < 0 or index > total - 1:
+        raise ValueError(f"progress index {index} is outside [0, {total - 1}]")
+    return float(index / (total - 1))
+
+
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -97,4 +107,3 @@ def safe_float(value: Any, default: float = 0.0) -> float:
     if math.isnan(number) or math.isinf(number):
         return default
     return number
-

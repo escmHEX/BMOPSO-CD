@@ -8,15 +8,16 @@ experiment:
   frozen_components: []
 
 runtime:
-  backend: "fake"
-  outdir_base: "exec"
-  checkpoint_every: 1
+  outdir_base: "exec_test"
+
+checkpoint:
+  enabled: false
 
 models:
   sbert:
-    default: "fake-sbert"
+    default: "all-MiniLM-L6-v2"
     batch_size: 16
-    config_version: "test-v1"
+    config_version: "sbert-test-v1"
 
 selection:
   enabled: true
@@ -24,4 +25,3 @@ selection:
 
 monitor:
   enabled: false
-

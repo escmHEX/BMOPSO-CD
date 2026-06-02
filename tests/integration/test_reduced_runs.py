@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from binary_mopso_cd.runner import ExperimentRunner
+
+
+REFERENCE = "Evacuation orders remain in effect for Zone A until further notice."
+
+
+def run_with_config(config, tmp_path: Path, name: str) -> Path:
+    config.set("runtime.outdir_base", str(tmp_path / name))
+    outdirs = ExperimentRunner(config, REFERENCE).run_all()
+    assert len(outdirs) == 1
+    return outdirs[0]
+
+
+def test_reduced_initialization_run_uses_real_services(test_config, tmp_path):
+    test_config.set("experiment.n", 1)
+    test_config.set("experiment.iterations", 0)
+    outdir = run_with_config(test_config, tmp_path, "init")
+    assert (outdir / "reference.txt").exists()
+    assert (outdir / "data_initial_population.json").exists()
+    assert not (outdir / "checkpoints").exists()
+
+
+def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
+    test_config.set("experiment.n", 2)
+    test_config.set("experiment.iterations", 1)
+    outdir = run_with_config(test_config, tmp_path, "opt")
+    assert (outdir / "population_evaluated.json").exists()
+    assert (outdir / "pareto_front.json").exists()
+    assert (outdir / "llm_calls.jsonl").exists()
+
+
+def test_reduced_monitor_run_observes_without_decision_feedback(test_config, tmp_path):
+    test_config.set("experiment.n", 2)
+    test_config.set("experiment.iterations", 1)
+    test_config.set("monitor.enabled", True)
+    outdir = run_with_config(test_config, tmp_path, "monitor")
+    assert (outdir / "monitor_metrics.csv").exists()
+
+
+def test_reduced_checkpoint_resume(test_config, tmp_path):
+    test_config.set("experiment.n", 2)
+    test_config.set("experiment.iterations", 1)
+    test_config.set("checkpoint.enabled", True)
+    test_config.set("checkpoint.interval", 1)
+    first = run_with_config(test_config, tmp_path, "checkpoint_first")
+    checkpoint = first / "checkpoints" / "generation_0001.json"
+    assert checkpoint.exists()
+
+    test_config.set("runtime.resume_from", str(checkpoint))
+    test_config.set("experiment.iterations", 2)
+    resumed = run_with_config(test_config, tmp_path, "checkpoint_resumed")
+    assert (resumed / "checkpoints" / "generation_0002.json").exists()

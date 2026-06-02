@@ -37,11 +37,16 @@ Useful flags:
 --disable-selection
 --router-heuristic semantic_pool_generation=false
 --task-model synthetic_text_generation=qwen3.5:2b
+--enable-checkpoint
 --checkpoint-every 1
+--resume-from exec/<run>/checkpoints/generation_0001.json
 ```
 
 Speculative decoding is intentionally not supported in this version. The config
 contains a blocked flag so accidental activation fails during validation.
+Checkpoints are disabled by default. When enabled, snapshots are written by a
+single deferred worker and reference the persistent embedding cache file instead
+of embedding the cache in every checkpoint.
 
 ## Outputs
 
@@ -59,7 +64,7 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 - `runtime.txt`
 - `llm_calls.jsonl`
 - `archive_history.jsonl`
-- `checkpoints/generation_*.json`
+- `checkpoints/generation_*.json` when checkpointing is enabled
 
 These generated artifacts are ignored by Git.
 
@@ -69,8 +74,9 @@ These generated artifacts are ignored by Git.
 .\.venv\Scripts\python -m pytest
 ```
 
-The tests use fake LLM and fake embedding services by default. They validate the
-router, executor, embedding cache, objective calculation, dominance, crowding
-distance, archive pruning, frozen components, final selection, and a reduced
-end-to-end run.
-
+The tests use real services for executor, embeddings and reduced integration
+runs. Unit tests that cover pure optimizer logic avoid unnecessary model loading
+but do not replace the runtime backend. Coverage includes router schedules,
+executor/Ollama contract, embedding cache, objective calculation, dominance,
+crowding distance, archive pruning, frozen components, final selection,
+checkpoint behavior, lazy sampling and reduced end-to-end runs.

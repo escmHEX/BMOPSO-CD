@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from binary_mopso_cd.config import RuntimeConfig
-from binary_mopso_cd.utils import word_count
+from binary_mopso_cd.utils import progress_ratio, word_count
 
 
 TASK_ANCHORS = "semantic_anchor_extraction"
@@ -89,32 +89,40 @@ class SemanticRouter:
     def _llm_params(self, task: RouteTask) -> dict[str, Any]:
         enabled = bool(self.config.get(f"router.heuristics.{task.semantic_task}", True))
         if not enabled:
-            return {"temperature": 0.60, "top_p": 0.90}
+            return dict(self.config.get("router.llm_params.disabled_default"))
         if task.semantic_task == TASK_ANCHORS:
             reference = str(task.task_params.get("reference_text", ""))
-            if word_count(reference) <= 6:
-                return {"temperature": 0.25, "top_p": 0.90}
-            return {"temperature": 0.20, "top_p": 0.85}
+            base = self.config.get("router.llm_params.semantic_anchor_extraction")
+            bucket = "short" if word_count(reference) <= int(base["short_word_threshold"]) else "long"
+            return dict(base[bucket])
         if task.semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
             component = str(task.task_params.get("component", "topic")).lower()
             reference = str(task.task_params.get("reference_text", ""))
             anchor_count = int(task.task_params.get("central_anchor_count", 0))
-            low_evidence = word_count(reference) <= 6 or anchor_count < 4
-            table = {
-                "role": (0.68, 0.95) if low_evidence else (0.60, 0.90),
-                "topic": (0.42, 0.90) if low_evidence else (0.40, 0.89),
-                "action": (0.58, 0.94) if low_evidence else (0.50, 0.90),
-            }
-            temperature, top_p = table.get(component, (0.55, 0.90))
-            return {"temperature": temperature, "top_p": top_p}
+            base = self.config.get("router.llm_params.semantic_pool_generation")
+            low_evidence = (
+                word_count(reference) <= int(base["low_evidence_word_threshold"])
+                or anchor_count < int(base["low_evidence_anchor_threshold"])
+            )
+            bucket = "low_evidence" if low_evidence else "normal"
+            component_params = base["components"].get(component)
+            if component_params is None:
+                component_params = self.config.get("router.llm_params.disabled_default")
+                return dict(component_params)
+            return dict(component_params[bucket])
         if task.semantic_task == TASK_INFLUENCE:
             iteration = int(task.task_params.get("iteration", 0))
             total = int(task.task_params.get("iterations", 1))
-            rho = 0.0 if total <= 1 else iteration / max(total - 1, 1)
-            return {"temperature": 0.70 - 0.20 * rho, "top_p": 0.95 - 0.05 * rho}
+            rho = progress_ratio(iteration, total)
+            base = self.config.get("router.llm_params.semantic_component_influence_candidates")
+            temperature = float(base["temperature_start"]) - (
+                float(base["temperature_start"]) - float(base["temperature_end"])
+            ) * rho
+            top_p = float(base["top_p_start"]) - (float(base["top_p_start"]) - float(base["top_p_end"])) * rho
+            return {"temperature": temperature, "top_p": top_p}
         if task.semantic_task == TASK_SYNTHETIC_TEXT:
-            return {"temperature": 0.75, "top_p": 0.95}
-        return {"temperature": 0.60, "top_p": 0.90}
+            return dict(self.config.get("router.llm_params.synthetic_text_generation"))
+        return dict(self.config.get("router.llm_params.disabled_default"))
 
     def _route_word_replacement(self, task: RouteTask) -> ExecutionTask:
         tokens = list(task.task_params.get("tokens", []))
@@ -134,4 +142,3 @@ class SemanticRouter:
             task.task_params,
             {"max_variants": max_variants, "use_ppdb": self.config.get("models.ppdb.enabled", True)},
         )
-

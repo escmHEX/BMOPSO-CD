@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.router import TASK_SYNTHETIC_TEXT, RouteTask, SemanticRouter
 
@@ -7,12 +9,22 @@ from binary_mopso_cd.router import TASK_SYNTHETIC_TEXT, RouteTask, SemanticRoute
 def test_executor_ollama_contract_is_single_shot_stream_false(test_config, tmp_path):
     router = SemanticRouter(test_config)
     executor = SemanticTaskExecutor(test_config, outdir=tmp_path)
-    task = RouteTask("x", "test", TASK_SYNTHETIC_TEXT, {"prompt": "Write alert", "reference_text": "Alert"})
+    task = RouteTask(
+        "x",
+        "test",
+        TASK_SYNTHETIC_TEXT,
+        {
+            "prompt": (
+                "Generate a short natural-disaster scenario message using the following semantic components: "
+                "role = local official; topic = evacuation order; action = warn residents. "
+                "The generated message must follow the role, address the topic, and satisfy the action."
+            ),
+            "reference_text": "Evacuation order",
+        },
+    )
     result = executor.execute(router.route(task))
     assert result
-    call = executor.llm_client.calls[-1]
-    assert len(call["messages"]) == 2
-    assert call["messages"][0]["role"] == "system"
-    assert call["messages"][1]["role"] == "user"
+    call = json.loads((tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert call["message_count"] == 2
+    assert call["stream"] is False
     assert call["options"]["temperature"] == 0.75
-

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import math
 from random import Random
 from typing import Any
@@ -21,10 +20,8 @@ from binary_mopso_cd.router import (
     RouteTask,
     SemanticRouter,
 )
+from binary_mopso_cd.settings import ComponentSettings, InitializationSettings
 from binary_mopso_cd.utils import canonical_text, unique_preserve_order, word_count
-
-
-POOL_MAX_WORDS = {"role": 6, "topic": 8, "action": 6}
 
 
 class InitialPopulationBuilder:
@@ -33,19 +30,29 @@ class InitialPopulationBuilder:
         self.router = router
         self.executor = executor
         self.rng = rng
+        self.components = ComponentSettings.from_config(config)
+        self.settings = InitializationSettings.from_config(config)
 
     def build(self, reference_text: str) -> list[Solution]:
         n = self.config.n
         domain = str(self.config.get("experiment.domain"))
         anchors = self._extract_anchors(reference_text)
+        central_anchor_count = count_anchors(anchors)
         pool_sizes = choose_pool_sizes(n, self.config)
         pools: dict[str, list[str]] = {}
         for component, quantity in pool_sizes.items():
-            pools[component] = self._build_pool(component, quantity, reference_text, anchors, domain)
+            pools[component] = self._build_pool(
+                component,
+                quantity,
+                reference_text,
+                anchors,
+                central_anchor_count,
+                domain,
+            )
         product = math.prod(len(values) for values in pools.values())
-        min_product = int(self.config.get("initialization.min_product_multiplier", 3)) * n
+        min_product = self.settings.min_product_multiplier * n
         if product < min_product:
-            self._expand_one_pool(pools, min_product, reference_text, anchors, domain)
+            self._expand_one_pool(pools, min_product, reference_text, anchors, central_anchor_count, domain)
         product = math.prod(len(values) for values in pools.values())
         if product < min_product:
             raise RuntimeError(f"Initial semantic pools are insufficient: product={product}, required={min_product}")
@@ -64,21 +71,22 @@ class InitialPopulationBuilder:
         evaluate_solutions(selected, reference_text, self.executor.embedding_service)
         for solution in selected:
             solution.initial_components = dict(solution.vector.components)
-            solution.velocity = {component: 0.0 for component in self.config.components}
+            solution.velocity = {component: 0.0 for component in self.components.order}
             solution.last_guided_move = {}
             solution.changed = False
         return selected
 
-    def _extract_anchors(self, reference_text: str) -> list[str]:
+    def _extract_anchors(self, reference_text: str) -> dict[str, list[str]]:
         route = RouteTask(uuid4().hex, "initialization", TASK_ANCHORS, {"reference_text": reference_text})
-        return list(self.executor.execute(self.router.route(route)))
+        return dict(self.executor.execute(self.router.route(route)))
 
     def _build_pool(
         self,
         component: str,
         quantity: int,
         reference_text: str,
-        anchors: list[str],
+        anchors: dict[str, list[str]],
+        central_anchor_count: int,
         domain: str,
         existing: list[str] | None = None,
         task_name: str = TASK_POOL_GENERATION,
@@ -92,23 +100,25 @@ class InitialPopulationBuilder:
                 "quantity": quantity,
                 "reference_text": reference_text,
                 "anchors": anchors,
-                "central_anchor_count": len(anchors),
+                "central_anchor_count": central_anchor_count,
                 "domain": domain,
                 "existing": existing or [],
+                "max_words_by_component": dict(self.components.max_words),
             },
         )
         raw = self.executor.execute(self.router.route(route))
-        return validate_pool(component, raw)
+        return validate_pool(component, raw, self.config)
 
     def _expand_one_pool(
         self,
         pools: dict[str, list[str]],
         required_product: int,
         reference_text: str,
-        anchors: list[str],
+        anchors: dict[str, list[str]],
+        central_anchor_count: int,
         domain: str,
     ) -> None:
-        for component in ["role", "action", "topic"]:
+        for component in self.components.expansion_order:
             if component not in pools:
                 continue
             other_sizes = [len(values) for name, values in pools.items() if name != component]
@@ -120,22 +130,55 @@ class InitialPopulationBuilder:
                 extra,
                 reference_text,
                 anchors,
+                central_anchor_count,
                 domain,
                 existing=pools[component],
                 task_name=TASK_POOL_EXPANSION,
             )
-            pools[component] = validate_pool(component, pools[component] + additions)
+            pools[component] = validate_pool(component, pools[component] + additions, self.config)
             if math.prod(len(values) for values in pools.values()) >= required_product:
                 return
 
     def _candidate_vectors(self, pools: dict[str, list[str]]) -> list[SemanticVector]:
-        components = self.config.components
+        components = self.components.order
         values = [pools[component] for component in components]
-        all_vectors = [SemanticVector(dict(zip(components, combo, strict=True))) for combo in itertools.product(*values)]
-        limit = int(self.config.get("initialization.candidate_multiplier", 4)) * self.config.n
-        if len(all_vectors) <= limit:
-            return all_vectors
-        return self.rng.sample(all_vectors, limit)
+        limit = self.settings.candidate_multiplier * self.config.n
+        total = math.prod(len(items) for items in values)
+        if total <= limit:
+            return [
+                SemanticVector(dict(zip(components, combo, strict=True)))
+                for combo in materialize_product(values)
+            ]
+        return self._stratified_lazy_vectors(components, values, total, limit)
+
+    def _stratified_lazy_vectors(
+        self,
+        components: list[str],
+        values: list[list[str]],
+        total: int,
+        limit: int,
+    ) -> list[SemanticVector]:
+        vectors: list[SemanticVector] = []
+        seen_indices: set[int] = set()
+        for stratum in range(limit):
+            start = math.floor(stratum * total / limit)
+            end = max(start, math.floor((stratum + 1) * total / limit) - 1)
+            index = self.rng.randint(start, end)
+            if index in seen_indices:
+                index = start
+                while index <= end and index in seen_indices:
+                    index += 1
+            if index >= total or index in seen_indices:
+                continue
+            seen_indices.add(index)
+            vectors.append(vector_from_product_index(components, values, index))
+        fill_index = 0
+        while len(vectors) < limit and fill_index < total:
+            if fill_index not in seen_indices:
+                seen_indices.add(fill_index)
+                vectors.append(vector_from_product_index(components, values, fill_index))
+            fill_index += 1
+        return vectors
 
     def _reduce_by_prompt_diversity(
         self,
@@ -166,8 +209,9 @@ class InitialPopulationBuilder:
 
     def _generate_texts(self, items: list[tuple[SemanticVector, str, float]], reference_text: str) -> list[Solution]:
         accepted: list[Solution] = []
+        rejections: list[dict[str, Any]] = []
         seen: set[str] = {canonical_text(reference_text)}
-        for vector, prompt, diversity_score in items:
+        for index, (vector, prompt, diversity_score) in enumerate(items):
             route = RouteTask(
                 uuid4().hex,
                 "initialization",
@@ -177,9 +221,11 @@ class InitialPopulationBuilder:
             text = str(self.executor.execute(self.router.route(route))).strip()
             key = canonical_text(text)
             if not key or key in seen:
+                rejections.append({"index": index, "reason": "empty_or_duplicate", "text": text})
                 continue
             sentence_count = max(1, text.count(".") + text.count("!") + text.count("?"))
-            if sentence_count > int(self.config.get("initialization.generated_sentences_max", 4)):
+            if sentence_count > self.settings.generated_sentences_max:
+                rejections.append({"index": index, "reason": "sentence_limit", "text": text})
                 continue
             seen.add(key)
             accepted.append(
@@ -191,30 +237,42 @@ class InitialPopulationBuilder:
                 )
             )
         if len(accepted) < self.config.n:
-            raise RuntimeError(f"Generated only {len(accepted)} valid initial texts; required {self.config.n}")
+            self._write_rejections(rejections)
+            raise RuntimeError(
+                f"Generated only {len(accepted)} valid initial texts after {len(items)} specified generation calls; "
+                f"required {self.config.n}. See initialization_rejections.jsonl."
+            )
+        if rejections:
+            self._write_rejections(rejections)
         return accepted
+
+    def _write_rejections(self, rows: list[dict[str, Any]]) -> None:
+        if not rows or self.executor.outdir is None:
+            return
+        import json
+
+        path = self.executor.outdir / "initialization_rejections.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def choose_pool_sizes(n: int, config: RuntimeConfig) -> dict[str, int]:
-    alpha_role = float(config.get("initialization.alpha_role", 1.4))
-    alpha_action = float(config.get("initialization.alpha_action", 1.2))
-    alpha_topic = float(config.get("initialization.alpha_topic", 1.0))
-    c = max(2, round((4 * n / (alpha_role * alpha_action * alpha_topic)) ** (1 / 3)))
-    sizes = {
-        "role": math.ceil(alpha_role * c),
-        "action": math.ceil(alpha_action * c),
-        "topic": math.ceil(alpha_topic * c),
-    }
-    order = ["role", "action", "topic"]
+    components = ComponentSettings.from_config(config)
+    alphas = dict(components.alpha)
+    alpha_product = math.prod(alphas.values())
+    c = max(2, round((4 * n / alpha_product) ** (1 / max(len(components.order), 1))))
+    sizes = {component: math.ceil(alpha * c) for component, alpha in alphas.items()}
+    order = list(components.expansion_order)
     idx = 0
     while math.prod(sizes.values()) < 4 * n:
         sizes[order[idx % len(order)]] += 1
         idx += 1
-    return {component: sizes.get(component, c) for component in config.components}
+    return {component: sizes.get(component, c) for component in components.order}
 
 
-def validate_pool(component: str, values: list[str]) -> list[str]:
-    max_words = POOL_MAX_WORDS.get(component, 8)
+def validate_pool(component: str, values: list[str], config: RuntimeConfig) -> list[str]:
+    max_words = ComponentSettings.from_config(config).max_words[component]
     valid = []
     for value in values:
         text = str(value).strip()
@@ -224,6 +282,29 @@ def validate_pool(component: str, values: list[str]) -> list[str]:
             continue
         valid.append(text)
     return unique_preserve_order(valid)
+
+
+def count_anchors(anchors: dict[str, list[str]]) -> int:
+    return sum(len(values) for values in anchors.values())
+
+
+def materialize_product(values: list[list[str]]) -> list[tuple[str, ...]]:
+    if not values:
+        return []
+    result: list[tuple[str, ...]] = [()]
+    for pool in values:
+        result = [prefix + (item,) for prefix in result for item in pool]
+    return result
+
+
+def vector_from_product_index(components: list[str], values: list[list[str]], index: int) -> SemanticVector:
+    selected: list[str] = []
+    remainder = index
+    for pool in reversed(values):
+        selected.append(pool[remainder % len(pool)])
+        remainder //= len(pool)
+    selected.reverse()
+    return SemanticVector(dict(zip(components, selected, strict=True)))
 
 
 def greedy_max_min_indices(embeddings: np.ndarray, count: int) -> list[int]:
@@ -239,4 +320,3 @@ def greedy_max_min_indices(embeddings: np.ndarray, count: int) -> list[int]:
         selected.append(best_idx)
         remaining.remove(best_idx)
     return selected
-

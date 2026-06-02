@@ -11,6 +11,7 @@ from binary_mopso_cd.router import (
     TASK_POOL_GENERATION,
     TASK_SYNTHETIC_TEXT,
 )
+from binary_mopso_cd.utils import canonical_text
 
 
 SYSTEM_JSON = (
@@ -18,11 +19,35 @@ SYSTEM_JSON = (
     "Return only valid JSON. Do not include markdown, explanations, comments, or extra text."
 )
 
-SYSTEM_TEXT_GENERATION = (
-    "You are a plain-text generator for natural-disaster scenario messages. "
-    "Return plain text only: one final message, 1-4 sentences. "
-    "Do not use quotes, hashtags, URLs, usernames, placeholders, tags, lists, or explanations."
-)
+SYSTEM_TEXT_GENERATION = """You are a plain-text generator for natural-disaster scenario messages.
+You will receive one text-generation instruction from the user.
+Follow the instruction and generate exactly one final text message.
+Output rules:
+- Return plain text only.
+- Return the dataset content itself, not a prompt, explanation, title, label, list, code, or metadata.
+- Do not describe the task.
+- Do not add unsolicited safety advice.
+- Do not use quotation marks, hashtags, URLs, usernames, placeholders, tags, or special markers.
+- Limit the message to between 1 and 4 sentences.
+- Return only the final message."""
+
+
+JSON_ARRAY_OF_STRINGS_SCHEMA = {
+    "type": "array",
+    "items": {"type": "string"},
+}
+
+ANCHOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "entities": JSON_ARRAY_OF_STRINGS_SCHEMA,
+        "topics": JSON_ARRAY_OF_STRINGS_SCHEMA,
+        "actions": JSON_ARRAY_OF_STRINGS_SCHEMA,
+        "constraints": JSON_ARRAY_OF_STRINGS_SCHEMA,
+    },
+    "required": ["entities", "topics", "actions", "constraints"],
+    "additionalProperties": False,
+}
 
 
 def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str]:
@@ -31,7 +56,8 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             SYSTEM_JSON,
             (
                 "Extract concise central semantic anchors from this reference text. "
-                "Return an object with key central_anchors containing 4 to 8 short strings.\n"
+                "Return only valid JSON with exactly these keys: entities, topics, actions, constraints. "
+                "Each value must be a list of non-empty short strings without exact duplicates after normalization.\n"
                 f"Reference text: {params['reference_text']}"
             ),
         )
@@ -45,7 +71,7 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             (
                 f"{mode} a semantic pool for component {component!r}. "
                 f"Return a JSON array with exactly {quantity} unique short strings. "
-                "Respect these maximum word counts: role 6, topic 8, action 6. "
+                f"Respect these maximum word counts: {json.dumps(params.get('max_words_by_component', {}), ensure_ascii=False)}. "
                 f"Domain: {params.get('domain')}. "
                 f"Reference text: {params.get('reference_text')}. "
                 f"Anchors: {json.dumps(params.get('anchors', []), ensure_ascii=False)}. "
@@ -57,7 +83,8 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             SYSTEM_JSON,
             (
                 "Generate semantic component candidates that move the current component toward the target. "
-                f"Return a JSON array with at most {int(params.get('max_candidates', 5))} short strings. "
+                f"Return only a JSON array with at most {int(params.get('max_candidates', 5))} short strings. "
+                "Do not return an object, keys, labels, explanations, or nested structures. "
                 "Do not copy the current or target literally. "
                 f"Component name: {params.get('component')}. "
                 f"Current: {params.get('current')}. "
@@ -68,6 +95,16 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
     if semantic_task == TASK_SYNTHETIC_TEXT:
         return SYSTEM_TEXT_GENERATION, str(params["prompt"])
     raise ValueError(f"No prompt template for semantic task: {semantic_task}")
+
+
+def response_format_for_task(semantic_task: str) -> Any:
+    if semantic_task == TASK_SYNTHETIC_TEXT:
+        return None
+    if semantic_task == TASK_ANCHORS:
+        return ANCHOR_SCHEMA
+    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION, TASK_INFLUENCE}:
+        return JSON_ARRAY_OF_STRINGS_SCHEMA
+    return "json"
 
 
 def parse_json_payload(raw: str) -> Any:
@@ -93,10 +130,27 @@ def parse_task_result(semantic_task: str, raw: str) -> Any:
         return raw.strip()
     payload = parse_json_payload(raw)
     if semantic_task == TASK_ANCHORS:
-        anchors = payload.get("central_anchors") if isinstance(payload, dict) else payload
-        if not isinstance(anchors, list):
-            raise ValueError("Anchor extraction must return central_anchors list")
-        return [str(item).strip() for item in anchors if str(item).strip()]
+        if not isinstance(payload, dict):
+            raise ValueError("Anchor extraction must return a JSON object")
+        expected = ["entities", "topics", "actions", "constraints"]
+        missing = [key for key in expected if key not in payload]
+        if missing:
+            raise ValueError(f"Anchor extraction missing keys: {missing}")
+        anchors: dict[str, list[str]] = {}
+        for key in expected:
+            value = payload[key]
+            if not isinstance(value, list):
+                raise ValueError(f"Anchor extraction key {key!r} must be a list")
+            seen: set[str] = set()
+            items: list[str] = []
+            for item in value:
+                text = str(item).strip()
+                normalized = canonical_text(text)
+                if text and normalized not in seen:
+                    seen.add(normalized)
+                    items.append(text)
+            anchors[key] = items
+        return anchors
     if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION, TASK_INFLUENCE}:
         if isinstance(payload, dict):
             lists = [value for value in payload.values() if isinstance(value, list)]

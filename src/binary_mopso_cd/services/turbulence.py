@@ -84,18 +84,29 @@ class WordNetPPDBProvider:
             self._wordnet = wordnet
         return self._wordnet
 
-    def candidates(self, text: str, target_index: int, max_variants: int, use_ppdb: bool = True) -> list[str]:
+    def candidates(
+        self,
+        text: str,
+        target_index: int,
+        max_variants: int,
+        use_ppdb: bool = True,
+        target_lemma: str | None = None,
+        target_pos: str | None = None,
+    ) -> list[str]:
         tokens = tokenize_component(text)
         if target_index < 0 or target_index >= len(tokens):
             return []
         target = tokens[target_index]
         replacements: list[str] = []
         if self.use_wordnet:
-            for synset in self.wordnet.synsets(target):
+            wordnet_pos = spacy_pos_to_wordnet(target_pos)
+            for synset in self.wordnet.synsets(target_lemma or target, pos=wordnet_pos):
                 for lemma in synset.lemmas():
                     replacements.append(lemma.name().replace("_", " "))
         if use_ppdb and len(unique_preserve_order(replacements)) < max_variants:
             replacements.extend(self.ppdb.lookup(target))
+            if target_lemma:
+                replacements.extend(self.ppdb.lookup(target_lemma))
         filtered = []
         for replacement in replacements:
             value = replacement.strip()
@@ -118,14 +129,59 @@ def build_variants(tokens: list[str], target_index: int, replacements: list[str]
     return variants
 
 
-class FakeTurbulenceProvider:
+def spacy_pos_to_wordnet(pos: str | None) -> str | None:
+    mapping = {
+        "ADJ": "a",
+        "ADV": "r",
+        "NOUN": "n",
+        "PROPN": "n",
+        "VERB": "v",
+    }
+    return mapping.get(str(pos or "").upper())
+
+
+class TurbulenceService:
+    def __init__(
+        self,
+        distilbert: DistilBertFillMaskProvider,
+        wordnet: WordNetPPDBProvider,
+        spacy_model: str,
+    ):
+        self.distilbert = distilbert
+        self.wordnet = wordnet
+        self.spacy_model = spacy_model
+        self._nlp: Any | None = None
+
+    @property
+    def nlp(self) -> Any:
+        if self._nlp is None:
+            import spacy
+
+            self._nlp = spacy.load(self.spacy_model)
+        return self._nlp
+
     def distilbert_candidates(self, text: str, target_index: int, preliminary_top_k: int, max_variants: int) -> list[str]:
-        tokens = tokenize_component(text)
-        if not tokens:
-            return []
-        idx = max(0, min(target_index, len(tokens) - 1))
-        return build_variants(tokens, idx, ["urgent", "clear", "public", "safe"], max_variants)
+        return self.distilbert.candidates(text, target_index, preliminary_top_k, max_variants)
 
     def wordnet_candidates(self, text: str, target_index: int, max_variants: int, use_ppdb: bool = True) -> list[str]:
-        return self.distilbert_candidates(text, target_index, max_variants * 3, max_variants)
+        tokens = tokenize_component(text)
+        target = tokens[target_index] if 0 <= target_index < len(tokens) else ""
+        lemma, pos = self._target_features(text, target)
+        return self.wordnet.candidates(
+            text,
+            target_index,
+            max_variants,
+            use_ppdb=use_ppdb,
+            target_lemma=lemma,
+            target_pos=pos,
+        )
 
+    def _target_features(self, text: str, target: str) -> tuple[str | None, str | None]:
+        if not target:
+            return None, None
+        doc = self.nlp(text)
+        target_key = canonical_text(target)
+        for token in doc:
+            if canonical_text(token.text) == target_key:
+                return token.lemma_, token.pos_
+        return target, None
