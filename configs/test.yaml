@@ -1,0 +1,27 @@
+experiment:
+  n: 4
+  iterations: 2
+  runs: 1
+  seed: 7
+  domain: "Natural-disaster and emergency scenario messages"
+  components: ["role", "topic", "action"]
+  frozen_components: []
+
+runtime:
+  backend: "fake"
+  outdir_base: "exec"
+  checkpoint_every: 1
+
+models:
+  sbert:
+    default: "fake-sbert"
+    batch_size: 16
+    config_version: "test-v1"
+
+selection:
+  enabled: true
+  k: 2
+
+monitor:
+  enabled: false
+

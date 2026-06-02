@@ -1,0 +1,76 @@
+# Binary MOPSO-CD
+
+Python 3.13 implementation of the updated semantic Binary MOPSO-CD proposal.
+It uses Ollama for LLM calls, SBERT embeddings for both objectives, a semantic
+router/executor split, a discrete MOPSO-CD optimizer, and the final
+Entropy-TOPSIS-MMR selection module.
+
+## Setup
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -e ".[dev,models]"
+.\.venv\Scripts\python -m spacy download en_core_web_sm
+ollama pull llama3.1:8b
+ollama pull qwen3.5:2b
+```
+
+Place a compact PPDB index at `data/turbulence/ppdb_index.json` or update
+`models.ppdb.index_path` in the config.
+
+## Run
+
+```powershell
+.\.venv\Scripts\python -m binary_mopso_cd --reference-text "Evacuation orders remain in effect for Zone A until further notice." --n 100 --iterations 100
+```
+
+Useful flags:
+
+```text
+--runs 3
+--model llama3.1:8b
+--bert-model all-MiniLM-L6-v2
+--outdir-base exec
+--freeze-components role,topic
+--enable-monitor
+--disable-selection
+--router-heuristic semantic_pool_generation=false
+--task-model synthetic_text_generation=qwen3.5:2b
+--checkpoint-every 1
+```
+
+Speculative decoding is intentionally not supported in this version. The config
+contains a blocked flag so accidental activation fails during validation.
+
+## Outputs
+
+Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
+
+- `reference.txt`
+- `config_effective.yaml`
+- `data_initial_population.json`
+- `data_inicial_evaluada.json`
+- `population_evaluated.json`
+- `pareto_front.json`
+- `pareto_ranked.json`
+- `final_selection_hybrid.json`
+- `evolucion_metricas.csv`
+- `runtime.txt`
+- `llm_calls.jsonl`
+- `archive_history.jsonl`
+- `checkpoints/generation_*.json`
+
+These generated artifacts are ignored by Git.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\python -m pytest
+```
+
+The tests use fake LLM and fake embedding services by default. They validate the
+router, executor, embedding cache, objective calculation, dominance, crowding
+distance, archive pruning, frozen components, final selection, and a reduced
+end-to-end run.
+

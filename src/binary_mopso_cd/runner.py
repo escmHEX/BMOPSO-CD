@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+from random import Random
+
+from binary_mopso_cd.config import RuntimeConfig
+from binary_mopso_cd.entities import solution_from_dict
+from binary_mopso_cd.executor import SemanticTaskExecutor
+from binary_mopso_cd.initialization import InitialPopulationBuilder
+from binary_mopso_cd.mopso import BinaryMOPSOCDEngine, non_dominated
+from binary_mopso_cd.outputs import RuntimeTimer, create_run_dir, write_config, write_json, write_solutions
+from binary_mopso_cd.router import SemanticRouter
+from binary_mopso_cd.selection import mmr_select, rank_solutions
+from binary_mopso_cd.utils import rng_from_text
+
+
+class ExperimentRunner:
+    def __init__(self, config: RuntimeConfig, reference_text: str):
+        self.config = config
+        self.reference_text = reference_text
+
+    def run_all(self) -> list[Path]:
+        outdirs = []
+        for run_index in range(1, self.config.runs + 1):
+            run_config = RuntimeConfig(self.config.as_dict())
+            run_config.set("experiment.seed", self.config.seed + run_index - 1)
+            outdirs.append(self._run_one(run_config, run_index if self.config.runs > 1 else None))
+        return outdirs
+
+    def _run_one(self, config: RuntimeConfig, run_index: int | None) -> Path:
+        timer = RuntimeTimer()
+        outdir = create_run_dir(Path(str(config.get("runtime.outdir_base", "exec"))), run_index)
+        (outdir / "reference.txt").write_text(self.reference_text, encoding="utf-8")
+        write_config(outdir / "config_effective.yaml", config.as_dict())
+        router = SemanticRouter(config)
+        executor = SemanticTaskExecutor(config, outdir=outdir)
+        resume_path = config.get("runtime.resume_from")
+        checkpoint_payload = self._load_checkpoint(Path(resume_path)) if resume_path else None
+        if checkpoint_payload and "embedding_cache" in checkpoint_payload:
+            executor.embedding_service.cache.restore(checkpoint_payload["embedding_cache"])
+        rng = rng_from_text(config.seed, checkpoint_payload.get("rng_state") if checkpoint_payload else None)
+        if checkpoint_payload:
+            initial_population = [solution_from_dict(item) for item in checkpoint_payload["population"]]
+            pbest_state = [solution_from_dict(item) for item in checkpoint_payload["pbest"]]
+            archive_state = [solution_from_dict(item) for item in checkpoint_payload["archive"]]
+            component_memory = dict(checkpoint_payload.get("component_memory", {}))
+            start_generation = int(checkpoint_payload["generation"])
+            write_solutions(outdir / "data_initial_population.json", initial_population)
+            write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
+        else:
+            initial_builder = InitialPopulationBuilder(config, router, executor, rng)
+            initial_population = initial_builder.build(self.reference_text)
+            pbest_state = None
+            archive_state = None
+            component_memory = None
+            start_generation = 0
+            write_solutions(outdir / "data_initial_population.json", initial_population)
+            write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
+        engine = BinaryMOPSOCDEngine(config, router, executor, rng, outdir, self.reference_text)
+        population, archive = engine.run(
+            initial_population,
+            start_generation=start_generation,
+            pbest_state=pbest_state,
+            archive_state=archive_state,
+            component_memory=component_memory,
+        )
+        pareto = non_dominated(archive.solutions)
+        write_solutions(outdir / "population_evaluated.json", population)
+        write_solutions(outdir / "pareto_front.json", pareto)
+        if bool(config.get("selection.enabled", True)):
+            ranked = rank_solutions(
+                pareto,
+                tau_min=float(config.get("selection.tau_min", 0.20)),
+                tau_max=float(config.get("selection.tau_max", 0.94)),
+                epsilon=float(config.get("selection.epsilon", 0.0001)),
+            )
+            selected = mmr_select(
+                ranked,
+                executor.embedding_service,
+                k=int(config.get("selection.k", 5)),
+                lambda_mmr=float(config.get("selection.lambda_mmr", 0.35)),
+            )
+            write_json(
+                outdir / "pareto_ranked.json",
+                [
+                    {
+                        "solution": item.solution.solution_id,
+                        "topsis_score": item.topsis_score,
+                        "selected": item.selected,
+                    }
+                    for item in ranked
+                ],
+            )
+            write_solutions(outdir / "final_selection_hybrid.json", [item.solution for item in selected])
+        executor.save_caches()
+        timer.write(outdir / "runtime.txt", {"run_index": run_index or 1})
+        return outdir
+
+    def _load_checkpoint(self, path: Path) -> dict:
+        if not path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)

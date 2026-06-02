@@ -1,0 +1,18 @@
+experiment:
+  n: 4
+  iterations: 2
+  runs: 1
+  seed: 42
+
+runtime:
+  backend: "fake"
+  outdir_base: "exec"
+  checkpoint_every: 1
+
+selection:
+  enabled: true
+  k: 2
+
+monitor:
+  enabled: false
+
