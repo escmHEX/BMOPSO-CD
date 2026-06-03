@@ -403,7 +403,7 @@
   <section class="section runtime">
     <h3>RUNTIME - Logging de progreso</h3>
     <div class="formula-grid">
-      <div class="formula-card"><h4>Normalizacion solo para HV/spread</h4><div class="math">\[x=\operatorname{clip}\left(\frac{f_1+1}{2},0,1\right)\]\[y=\operatorname{clip}(f_2,0,1)\]</div><p>No cambia objetivos ni decisiones del optimizador.</p></div>
+      <div class="formula-card"><h4>Normalizacion solo para HV/spread</h4><div class="math">\[x=\operatorname{clip}\left(\frac{f_1+1}{2},0,1\right)\]\[y=\operatorname{clip}\left(\frac{f_2}{2},0,1\right)\]</div><p>No cambia objetivos ni decisiones del optimizador.</p></div>
       <div class="formula-card"><h4>Hypervolume</h4><div class="math">\[HV=\sum_k(x_k-x_{k-1})y_k,\qquad r=(0,0)\]</div><p>Usa puntos no dominados normalizados y colapsados por \(x\).</p></div>
       <div class="formula-card"><h4>Spread</h4><div class="math">\[Spread=\frac{\sum_i |d_i-\bar d|}{m\bar d}\]</div><p>\(d_i\) son distancias consecutivas del frente normalizado.</p></div>
     </div>

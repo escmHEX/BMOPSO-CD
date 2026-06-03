@@ -159,7 +159,7 @@ hyperparameter rows.
 | `SELECT` | Final selection count | \(K_{eff}=\min(K_{sel},n_f)\). | `selection.k`; loop stops at \(K_{sel}\) or no remaining candidates. | OK |
 | `MONITOR` | KMeans inertia | \(I=\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\). | `ObservationalMonitor.observe`; not read by optimizer. | OK |
 | `MONITOR` | Entity entropy | \(H_{ent}=-\sum_{\ell}p_\ell\ln p_\ell\), where \(p_\ell\) is the empirical frequency of entity label \(\ell\). | `entity_entropy`; spaCy labels only; not read by optimizer. | OK |
-| `RUNTIME` | HV logging normalization | \(x=\operatorname{clip}((f_1+1)/2,0,1)\), \(y=\operatorname{clip}(f_2,0,1)\). | `metrics.normalized_objective_point`; used only for progress metrics. | OK |
+| `RUNTIME` | HV logging normalization | \(x=\operatorname{clip}((f_1+1)/2,0,1)\), \(y=\operatorname{clip}(f_2/2,0,1)\). | `metrics.normalized_objective_point`; used only for progress metrics. | OK |
 | `RUNTIME` | Hypervolume progress metric | \(HV=\sum_k(x_k-x_{k-1})y_k\), over collapsed non-dominated points sorted by \(x\), with reference \((0,0)\). | `metrics.calculate_hypervolume`; not read by optimizer. | OK |
 | `RUNTIME` | Spread progress metric | \(Spread=\frac{\sum_i\lvert d_i-\bar d\rvert}{m\bar d}\), where \(d_i\) are consecutive distances in the normalized non-dominated front. | `metrics.calculate_spread`; not read by optimizer. | OK |
 | `CHECKPOINT` | Checkpoint trigger | Save only if checkpoints are enabled and \(g\bmod interval=0\). | `CheckpointManager`; disabled by default. | OK |

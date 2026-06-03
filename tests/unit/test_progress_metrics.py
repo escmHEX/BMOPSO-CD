@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
-from binary_mopso_cd.metrics import archive_metrics, calculate_hypervolume, calculate_spread
+from binary_mopso_cd.metrics import archive_metrics, calculate_hypervolume, calculate_spread, normalized_objective_point
 from binary_mopso_cd.progress import ProgressLogger
 
 
@@ -28,10 +28,11 @@ def test_hypervolume_and_spread_follow_local_convention():
     assert math.isclose(calculate_spread(points), expected_spread)
 
 
-def test_archive_metrics_normalize_fidelity_and_clamp_diversity():
+def test_archive_metrics_normalize_fidelity_and_cosine_distance_diversity():
     metrics = archive_metrics([solution(-1.0, 1.5, 1), solution(1.0, 0.5, 2)])
 
-    assert metrics["hypervolume"] == 0.5
+    assert normalized_objective_point(solution(-1.0, 1.5, 1)) == (0.0, 0.75)
+    assert metrics["hypervolume"] == 0.25
     assert metrics["spread"] is None
 
 

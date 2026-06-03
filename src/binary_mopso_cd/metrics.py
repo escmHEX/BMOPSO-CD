@@ -5,6 +5,9 @@ import math
 from binary_mopso_cd.entities import Solution
 
 
+COSINE_DISTANCE_UPPER_BOUND = 2.0
+
+
 def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
@@ -13,7 +16,7 @@ def normalized_objective_point(solution: Solution) -> tuple[float, float] | None
     if solution.objectives is None:
         return None
     fidelity = clamp((solution.objectives.f1 + 1.0) / 2.0, 0.0, 1.0)
-    diversity = clamp(solution.objectives.f2, 0.0, 1.0)
+    diversity = clamp(solution.objectives.f2 / COSINE_DISTANCE_UPPER_BOUND, 0.0, 1.0)
     return fidelity, diversity
 
 
