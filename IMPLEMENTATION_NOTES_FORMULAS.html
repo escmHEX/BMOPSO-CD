@@ -325,6 +325,7 @@
       <div class="formula-card"><h4>Similitud coseno</h4><div class="math">\[\operatorname{SimCos}(u,v)=\frac{u^\top v}{\lVert u\rVert_2\lVert v\rVert_2}\]</div></div>
       <div class="formula-card"><h4>Fidelidad semantica</h4><div class="math">\[f_1(x_i)=\operatorname{SimCos}(E(G_i),E(y_{ref}))\]</div></div>
       <div class="formula-card"><h4>Diversidad semantica</h4><div class="math">\[f_2(x_i)=\frac{1}{N-1}\sum_{j\ne i}\left(1-\operatorname{SimCos}(E(G_i),E(G_j))\right)\]\[N\le1\Rightarrow f_2(x_i)=0\]</div></div>
+      <div class="formula-card"><h4>Conjunto de evaluacion MOPSO</h4><div class="math">\[S_t=\operatorname{unique}(P_{t+1}\cup PB_t\cup A_t)\]\[\operatorname{signature}(x)=\text{componentes normalizados de }x\]</div><p>La primera ocurrencia se conserva para evaluar \(f_2\).</p></div>
       <div class="formula-card"><h4>Matriz vectorizada</h4><div class="math">\[S=ZZ^\top,\qquad D_{ij}=1-S_{ij},\qquad D_{ii}=0\]</div></div>
       <div class="formula-card"><h4>Clave robusta de cache</h4><div class="math">\[key=\operatorname{SHA256}(\{type,model,version,canonical(text)\})\]</div></div>
     </div>

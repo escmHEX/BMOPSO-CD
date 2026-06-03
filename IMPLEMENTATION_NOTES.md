@@ -125,6 +125,7 @@ hyperparameter rows.
 | `OBJ` | Semantic fidelity | \(f_1(x_i)=\operatorname{SimCos}(E(G_i),E(y_{ref}))\). | `evaluate_solutions`; `text_type=generated_text` and `reference_text`. | OK |
 | `OBJ` | Semantic diversity | \(f_2(x_i)=\frac{1}{N-1}\sum_{j\ne i}\left(1-\operatorname{SimCos}(E(G_i),E(G_j))\right)\). If \(N\le1\), \(f_2(x_i)=0\). | `semantic_diversity_scores`; one NxN matrix. | OK |
 | `OBJ` | Vectorized distance matrix | \(D_{ij}=1-S_{ij}\), where \(S=ZZ^\top\) for normalized embeddings \(Z\), and \(D_{ii}=0\). | `semantic_diversity_scores`; no repeated text-by-text embedding calls. | OK |
+| `OBJ` | MOPSO evaluation set | \(S_t=\operatorname{unique}(P_{t+1}\cup PB_t\cup A_t)\), using `signature(x)` from normalized semantic components and keeping the first occurrence. | `evaluate_unique_solutions_by_signature`; same identity as `ExternalArchive.update`. | OK |
 | `OBJ` | Embedding cache key | \(key=\operatorname{SHA256}(\{type,model,version,canonical(text)\})\). | `EmbeddingCacheKey.to_digest`; `models.sbert.config_version`. | OK |
 | `MOPSO` | Active components | \(\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen}\), \(F=\lvert\mathcal{D}_{frozen}\rvert\), \(0\le F\le D-1\). | `MOPSOOptimizer.active_components`; `experiment.frozen_components`. | OK |
 | `MOPSO` | Semantic distance in velocity | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\). | `semantic_velocity_delta`; used by `mopso._update_particle` for `delta_p` and `delta_l`. | OK |

@@ -27,9 +27,13 @@ from binary_mopso_cd.router import (
     RouteTask,
     SemanticRouter,
 )
+from binary_mopso_cd.services.embedding import EmbeddingService
 from binary_mopso_cd.services.turbulence import tokenize_component
 from binary_mopso_cd.settings import CheckpointSettings, ComponentSettings, MOPSOSettings
 from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, word_count
+
+
+SolutionSignature = tuple[tuple[str, str], ...]
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -84,6 +88,33 @@ def non_dominated(solutions: list[Solution]) -> list[Solution]:
     return result
 
 
+def deduplicate_solutions_by_signature(solutions: list[Solution]) -> list[Solution]:
+    first_by_signature: dict[SolutionSignature, Solution] = {}
+    for solution in solutions:
+        signature = solution.vector.signature()
+        if signature not in first_by_signature:
+            first_by_signature[signature] = solution
+    return list(first_by_signature.values())
+
+
+def copy_evaluation(source: Solution, target: Solution) -> None:
+    target.objectives = None if source.objectives is None else Objectives(source.objectives.f1, source.objectives.f2)
+    target.embedding = None if source.embedding is None else list(source.embedding)
+
+
+def evaluate_unique_solutions_by_signature(
+    solutions: list[Solution],
+    reference_text: str,
+    embedding_service: EmbeddingService,
+) -> list[Solution]:
+    unique_solutions = deduplicate_solutions_by_signature(solutions)
+    evaluate_solutions(unique_solutions, reference_text, embedding_service)
+    evaluated_by_signature = {solution.vector.signature(): solution for solution in unique_solutions}
+    for solution in solutions:
+        copy_evaluation(evaluated_by_signature[solution.vector.signature()], solution)
+    return solutions
+
+
 @dataclass
 class ExternalArchive:
     max_size: int
@@ -91,7 +122,7 @@ class ExternalArchive:
     solutions: list[Solution] = field(default_factory=list)
 
     def update(self, candidates: list[Solution]) -> list[Solution]:
-        merged = self._deduplicate(self.solutions + [candidate.clone() for candidate in candidates])
+        merged = deduplicate_solutions_by_signature(self.solutions + [candidate.clone() for candidate in candidates])
         self.solutions = non_dominated(merged)
         while len(self.solutions) > self.max_size:
             distances = crowding_distance(self.solutions)
@@ -111,15 +142,6 @@ class ExternalArchive:
         best_distance = max(distances[p.solution_id] for p in participants)
         tied = [p for p in participants if distances[p.solution_id] == best_distance]
         return self.rng.choice(tied)
-
-    def _deduplicate(self, candidates: list[Solution]) -> list[Solution]:
-        first_by_key: dict[tuple[tuple[str, str], ...], Solution] = {}
-        for solution in candidates:
-            key = solution.vector.signature()
-            if key not in first_by_key:
-                first_by_key[key] = solution
-        return list(first_by_key.values())
-
 
 class PBestUpdater:
     def __init__(self, weights: dict[str, float]):
@@ -209,7 +231,11 @@ class BinaryMOPSOCDEngine:
                     next_population.append(updated)
                 modified_count = sum(1 for solution in next_population if solution.changed)
                 comparison_batch = next_population + pbest + self.archive.solutions
-                evaluate_solutions(comparison_batch, self.reference_text, self.executor.embedding_service)
+                evaluate_unique_solutions_by_signature(
+                    comparison_batch,
+                    self.reference_text,
+                    self.executor.embedding_service,
+                )
                 next_population = comparison_batch[: len(next_population)]
                 pbest_candidates = comparison_batch[len(next_population) : len(next_population) + len(pbest)]
                 archive_revalued = comparison_batch[len(next_population) + len(pbest) :]
