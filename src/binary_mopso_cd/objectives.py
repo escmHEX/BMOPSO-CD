@@ -17,6 +17,18 @@ def semantic_diversity_scores(embeddings: np.ndarray) -> np.ndarray:
     return distances.sum(axis=1) / (n - 1)
 
 
+def semantic_fidelity_scores(
+    generated_texts: list[str],
+    reference_text: str,
+    embedding_service: EmbeddingService,
+) -> np.ndarray:
+    if not generated_texts:
+        return np.zeros(0, dtype=float)
+    generated_embeddings = embedding_service.encode(generated_texts, text_type="generated_text")
+    reference_embedding = embedding_service.encode([reference_text], text_type="reference_text")[0]
+    return generated_embeddings @ reference_embedding
+
+
 def evaluate_solutions(
     solutions: list[Solution],
     reference_text: str,
@@ -33,4 +45,3 @@ def evaluate_solutions(
         solution.objectives = Objectives(float(f1), float(f2))
         solution.embedding = [float(x) for x in embedding]
     return solutions
-

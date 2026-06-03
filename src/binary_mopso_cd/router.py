@@ -127,7 +127,7 @@ class SemanticRouter:
     def _route_word_replacement(self, task: RouteTask) -> ExecutionTask:
         tokens = list(task.task_params.get("tokens", []))
         index = int(task.task_params.get("target_index", -1))
-        max_variants = int(task.task_params.get("max_variants", self.config.get("mopso.kcand", 5)))
+        max_variants = int(task.task_params.get("max_variants", self.config.get("mopso.kcand", 7)))
         has_context = index > 0 and index < len(tokens) - 1
         if bool(self.config.get("router.heuristics.word_replacement_candidates", True)) and has_context:
             alg_params = {

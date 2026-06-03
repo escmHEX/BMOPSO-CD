@@ -139,7 +139,7 @@ class RuntimeConfig:
             raise ValueError("mopso.dmax must be positive")
         if dmax > active_count:
             raise ValueError("mopso.dmax must not exceed the number of active components")
-        if int(self.get("mopso.kcand", 5)) <= 0:
+        if int(self.get("mopso.kcand", 7)) <= 0:
             raise ValueError("mopso.kcand must be positive")
         if int(self.get("mopso.leader_tournament_size", 3)) <= 0:
             raise ValueError("mopso.leader_tournament_size must be positive")
@@ -167,6 +167,9 @@ class RuntimeConfig:
             raise ValueError("mopso.tau_tur_min must not exceed mopso.tau_tur_max")
         if int(self.get("mopso.k_retry", 0)) != 0:
             raise ValueError("mopso.k_retry must remain 0 for the specified strategy")
+        tau_gen_min = float(self.get("generated_text_validation.tau_gen_min", 0.15))
+        if tau_gen_min < -1.0 or tau_gen_min > 1.0:
+            raise ValueError("generated_text_validation.tau_gen_min must be in [-1, 1]")
         if int(self.get("initialization.candidate_multiplier", 4)) <= 0:
             raise ValueError("initialization.candidate_multiplier must be positive")
         if int(self.get("initialization.prompt_reduction_multiplier", 2)) <= 0:

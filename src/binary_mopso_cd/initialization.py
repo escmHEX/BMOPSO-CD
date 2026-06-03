@@ -8,9 +8,10 @@ from uuid import uuid4
 import numpy as np
 
 from binary_mopso_cd.config import RuntimeConfig
-from binary_mopso_cd.entities import SemanticVector, Solution
+from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.executor import SemanticTaskExecutor
-from binary_mopso_cd.objectives import evaluate_solutions
+from binary_mopso_cd.generated_text_validation import validate_generated_text
+from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
     TASK_POOL_EXPANSION,
@@ -32,6 +33,7 @@ class InitialPopulationBuilder:
         self.rng = rng
         self.components = ComponentSettings.from_config(config)
         self.settings = InitializationSettings.from_config(config)
+        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.15))
 
     def build(self, reference_text: str) -> list[Solution]:
         n = self.config.n
@@ -59,7 +61,6 @@ class InitialPopulationBuilder:
         candidates = self._candidate_vectors(pools)
         reduced = self._reduce_by_prompt_diversity(candidates, domain, 2 * n)
         generated = self._generate_texts(reduced, reference_text)
-        evaluate_solutions(generated, reference_text, self.executor.embedding_service)
         generated.sort(
             key=lambda solution: (
                 solution.objectives.f1 if solution.objectives else -2.0,
@@ -208,9 +209,9 @@ class InitialPopulationBuilder:
         return str(self.executor.execute(self.router.route(route)))
 
     def _generate_texts(self, items: list[tuple[SemanticVector, str, float]], reference_text: str) -> list[Solution]:
+        candidates: list[tuple[int, SemanticVector, str, float, str]] = []
         accepted: list[Solution] = []
         rejections: list[dict[str, Any]] = []
-        seen: set[str] = {canonical_text(reference_text)}
         for index, (vector, prompt, diversity_score) in enumerate(items):
             route = RouteTask(
                 uuid4().hex,
@@ -219,20 +220,46 @@ class InitialPopulationBuilder:
                 {"prompt": prompt, "reference_text": reference_text},
             )
             text = str(self.executor.execute(self.router.route(route))).strip()
-            key = canonical_text(text)
-            if not key or key in seen:
-                rejections.append({"index": index, "reason": "empty_or_duplicate", "text": text})
+            validation = validate_generated_text(
+                text,
+                reference_text,
+                max_sentences=self.settings.generated_sentences_max,
+            )
+            if not validation.valid:
+                rejections.append(self._rejection_row(validation.reason, text, index=index))
                 continue
-            sentence_count = max(1, text.count(".") + text.count("!") + text.count("?"))
-            if sentence_count > self.settings.generated_sentences_max:
-                rejections.append({"index": index, "reason": "sentence_limit", "text": text})
+            candidates.append((index, vector, prompt, diversity_score, text))
+
+        if candidates:
+            f1_values = semantic_fidelity_scores(
+                [item[4] for item in candidates],
+                reference_text,
+                self.executor.embedding_service,
+            )
+        else:
+            f1_values = np.zeros(0, dtype=float)
+
+        accepted_keys: set[str] = set()
+        for (index, vector, prompt, diversity_score, text), f1_value in zip(candidates, f1_values, strict=True):
+            f1 = float(f1_value)
+            validation = validate_generated_text(
+                text,
+                reference_text,
+                accepted_text_keys=accepted_keys,
+                f1=f1,
+                tau_gen_min=self.tau_gen_min,
+                max_sentences=self.settings.generated_sentences_max,
+            )
+            if not validation.valid:
+                rejections.append(self._rejection_row(validation.reason, text, index=index, f1=f1))
                 continue
-            seen.add(key)
+            accepted_keys.add(canonical_text(text))
             accepted.append(
                 Solution(
                     vector=vector.copy(),
                     prompt=prompt,
                     generated_text=text,
+                    objectives=Objectives(f1, 0.0),
                     metadata={"prompt_diversity_score": diversity_score},
                 )
             )
@@ -245,6 +272,16 @@ class InitialPopulationBuilder:
         if rejections:
             self._write_rejections(rejections)
         return accepted
+
+    def _rejection_row(self, reason: str | None, text: str, **metadata: Any) -> dict[str, Any]:
+        row = {
+            "phase": "initialization",
+            "reason": reason,
+            "f1": metadata.pop("f1", None),
+            "text": text,
+        }
+        row.update(metadata)
+        return row
 
     def _write_rejections(self, rows: list[dict[str, Any]]) -> None:
         if not rows or self.executor.outdir is None:

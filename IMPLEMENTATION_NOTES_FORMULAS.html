@@ -345,6 +345,7 @@
       <div class="formula-card"><h4>Maximo de cambios</h4><div class="math">\[\lvert M_i^t\rvert\le D_{max}\le\lvert\mathcal{D}_{active}\rvert\]</div></div>
       <div class="formula-card"><h4>Validacion guiada</h4><div class="math">\[\operatorname{SimCos}(E(c),E(target))>\operatorname{SimCos}(E(current),E(target))\]\[\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\]</div></div>
       <div class="formula-card"><h4>Validacion de turbulencia</h4><div class="math">\[\tau_{tur}^{min}\le\operatorname{SimCos}(E(c),E(current))\le\tau_{tur}^{max}\]\[\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\]</div></div>
+      <div class="formula-card"><h4>Validacion texto generado</h4><div class="math">\[f_1(x_i)\ge\tau_{gen}^{min}\]\[\neg containsRefusal(G_i)\]</div><p>Si falla, se restaura la particula y se conserva la velocidad actualizada.</p></div>
     </div>
   </section>
 
@@ -451,14 +452,15 @@
       <tr class="init"><td>INIT</td><td>Orden expansion</td><td>\(O_{exp}\)</td><td>role, action, topic</td><td><code>semantic_components.expansion_order</code></td><td>Expansion de pools.</td><td class="status-ok">OK</td></tr>
       <tr class="init"><td>INIT</td><td>Multiplicadores</td><td>\(M_{cand}/N,M_{min}/N,M_{red}/N\)</td><td>4, 3, 2</td><td><code>initialization.*_multiplier</code></td><td>4N, 3N, 2N.</td><td class="status-ok">OK</td></tr>
       <tr class="init"><td>INIT</td><td>Sentencias</td><td>\(S_{min},S_{max}\)</td><td>1, 4</td><td><code>initialization.generated_sentences_*</code></td><td>Validacion textos iniciales.</td><td class="status-ok">OK</td></tr>
+      <tr class="exec"><td>EXEC</td><td>Validacion texto generado</td><td>\(\tau_{gen}^{min}\)</td><td>0.15</td><td><code>generated_text_validation.tau_gen_min</code></td><td>Filtro de factibilidad.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Archivo</td><td>\(A_{max}/N\)</td><td>2</td><td><code>mopso.archive_multiplier</code></td><td>\(A_{max}=2N\).</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Torneo lider</td><td>\(q\)</td><td>3</td><td><code>mopso.leader_tournament_size</code></td><td>Lider por CD.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Cambios maximos</td><td>\(D_{max}\)</td><td>1</td><td><code>mopso.dmax</code></td><td>Componentes por particula/generacion.</td><td class="status-ok">OK</td></tr>
-      <tr class="mopso"><td>MOPSO</td><td>Candidatos</td><td>\(K_{cand}\)</td><td>5</td><td><code>mopso.kcand</code></td><td>Variantes por operador.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Candidatos</td><td>\(K_{cand}\)</td><td>7</td><td><code>mopso.kcand</code></td><td>Variantes por operador.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Inercia</td><td>\(\omega_{max},\omega_{min}\)</td><td>0.9, 0.4</td><td><code>mopso.omega_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Cognitivo/social</td><td>\(c_1,c_2\)</td><td>1.5, 1.5</td><td><code>mopso.c1</code>, <code>mopso.c2</code></td><td>Velocidad.</td><td class="status-ok">OK</td></tr>
-      <tr class="mopso"><td>MOPSO</td><td>Clamp y escala</td><td>\(V_{max},\alpha\)</td><td>4.0, 0.5</td><td><code>mopso.vmax</code>, <code>mopso.alpha</code></td><td>Transferencia V-shaped.</td><td class="status-ok">OK</td></tr>
-      <tr class="mopso"><td>MOPSO</td><td>Turbulencia</td><td>\(p_{tur}^{max},p_{tur}^{min}\)</td><td>0.05, 0.01</td><td><code>mopso.p_tur_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Clamp y escala</td><td>\(V_{max},\alpha\)</td><td>4.0, 1</td><td><code>mopso.vmax</code>, <code>mopso.alpha</code></td><td>Transferencia V-shaped.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Turbulencia</td><td>\(p_{tur}^{max},p_{tur}^{min}\)</td><td>0.07, 0.02</td><td><code>mopso.p_tur_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Retries</td><td>\(K_{retry}\)</td><td>0</td><td><code>mopso.k_retry</code></td><td>Sin reintentos extra.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Duplicados</td><td>\(\tau_{dup}\)</td><td>0.92</td><td><code>mopso.tau_dup</code></td><td>Filtro near-duplicate.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Fidelidad turbulencia</td><td>\(\tau_{tur}^{min},\tau_{tur}^{max}\)</td><td>0.65, 0.90</td><td><code>mopso.tau_tur_*</code></td><td>Rango local de reemplazo.</td><td class="status-ok">OK</td></tr>

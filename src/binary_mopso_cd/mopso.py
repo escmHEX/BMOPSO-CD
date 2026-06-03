@@ -15,9 +15,10 @@ from binary_mopso_cd.component_memory import ComponentMemoryIndex
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
+from binary_mopso_cd.generated_text_validation import validate_generated_text
 from binary_mopso_cd.metrics import archive_metrics
 from binary_mopso_cd.monitor import ObservationalMonitor
-from binary_mopso_cd.objectives import evaluate_solutions
+from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
 from binary_mopso_cd.router import (
     TASK_INFLUENCE,
     TASK_PROMPT_RENDERING,
@@ -156,6 +157,7 @@ class BinaryMOPSOCDEngine:
         self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
+        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.15))
         checkpoint = CheckpointSettings.from_config(config)
         self.archive = ExternalArchive(max_size=self.mopso.archive_multiplier * config.n, rng=rng)
         self.pbest_updater = PBestUpdater(self.mopso.utility_weights)
@@ -295,8 +297,35 @@ class BinaryMOPSOCDEngine:
             updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
             updated.velocity[component] = particle.velocity.get(component, 0.0)
         if updated.changed:
-            updated.prompt = self._render_prompt(updated.vector)
-            updated.generated_text = self._generate_text(updated.prompt)
+            proposed_prompt = self._render_prompt(updated.vector)
+            proposed_text = self._generate_text(proposed_prompt)
+            validation = validate_generated_text(proposed_text, self.reference_text)
+            f1: float | None = None
+            if validation.valid:
+                f1 = self._generated_text_fidelity(proposed_text)
+                validation = validate_generated_text(
+                    proposed_text,
+                    self.reference_text,
+                    f1=f1,
+                    tau_gen_min=self.tau_gen_min,
+                )
+            if not validation.valid:
+                self._write_optimization_rejection(
+                    {
+                        "phase": "optimization",
+                        "generation": generation,
+                        "solution_id": particle.solution_id,
+                        "reason": validation.reason,
+                        "f1": f1,
+                        "text": proposed_text,
+                    }
+                )
+                restored = particle.clone(keep_id=True)
+                restored.velocity = dict(updated.velocity)
+                restored.changed = False
+                return restored
+            updated.prompt = proposed_prompt
+            updated.generated_text = proposed_text
             updated.generation = generation
         return updated
 
@@ -468,6 +497,15 @@ class BinaryMOPSOCDEngine:
             {"prompt": prompt, "reference_text": self.reference_text},
         )
         return str(self.executor.execute(self.router.route(route))).strip()
+
+    def _generated_text_fidelity(self, text: str) -> float:
+        scores = semantic_fidelity_scores([text], self.reference_text, self.executor.embedding_service)
+        return float(scores[0]) if scores.size else 0.0
+
+    def _write_optimization_rejection(self, row: dict[str, Any]) -> None:
+        path = self.outdir / "optimization_rejections.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _generation_metrics(self, generation: int, population: list[Solution], modified_count: int) -> dict[str, Any]:
         f1 = [solution.objectives.f1 for solution in population if solution.objectives]

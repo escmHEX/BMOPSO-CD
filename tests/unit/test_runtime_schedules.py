@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from binary_mopso_cd.router import TASK_INFLUENCE, RouteTask, SemanticRouter
+from binary_mopso_cd.settings import MOPSOSettings
 from binary_mopso_cd.utils import progress_ratio
 
 
@@ -35,5 +36,19 @@ def test_checkpoint_interval_validation_only_when_enabled(test_config):
     test_config.set("checkpoint.interval", 0)
     test_config.validate()
     test_config.set("checkpoint.enabled", True)
+    with pytest.raises(ValueError):
+        test_config.validate()
+
+
+def test_mopso_default_hyperparameters_match_strategy(test_config):
+    settings = MOPSOSettings.from_config(test_config)
+    assert settings.kcand == 7
+    assert settings.alpha == 1.0
+    assert settings.p_tur_max == 0.07
+    assert settings.p_tur_min == 0.02
+
+
+def test_generated_text_validation_threshold_must_be_cosine_range(test_config):
+    test_config.set("generated_text_validation.tau_gen_min", 1.1)
     with pytest.raises(ValueError):
         test_config.validate()

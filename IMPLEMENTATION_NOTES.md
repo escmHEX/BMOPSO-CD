@@ -113,6 +113,7 @@ hyperparameter rows.
 | `EXEC` | LLM execution | \(y=LLM(S_{\tau},U_{\tau}(p');\theta)\). | `SemanticTaskExecutor`; `ollama.stream=false`; no conversational history is retained. | OK |
 | `EXEC` | Embedding execution | \(e=E(s)\in\mathbb{R}^{d_z}\). | `EmbeddingService.encode`; SBERT model from `models.sbert.*`. | OK |
 | `EXEC` | Synthetic text generation | \(G_i=LLM(S_{gen},P_i;\theta_{gen})\), with \(T_{gen}=0.75\) and \(p_{gen}=0.95\). | `llm_prompts.py`, `TASK_SYNTHETIC_TEXT`; `router.llm_params.synthetic_text_generation`. | OK |
+| `EXEC` | Generated text feasibility | Accept generated text only if it is non-empty, not the reference, not a refusal phrase, and \(f_1\ge\tau_{gen}^{min}\). Initialization also enforces duplicate and sentence-limit filters. | `generated_text_validation.validate_generated_text`; `generated_text_validation.tau_gen_min=0.15`. | OK |
 | `INIT` | Pool base size | \(c=\max\left(2,\operatorname{round}\left(\left(\frac{4N}{\prod_{d\in\mathcal{D}}\alpha_d}\right)^{1/D}\right)\right)\). | `choose_pool_sizes`; `semantic_components.rules.*.alpha`. | OK |
 | `INIT` | Per-component target size | \(q_d=\lceil\alpha_d c\rceil\). Increase \(q_d\) in expansion order until \(\prod_d q_d\ge4N\). | `choose_pool_sizes`; `semantic_components.expansion_order`. | OK |
 | `INIT` | Minimum pool product | \(\prod_{d\in\mathcal{D}}\lvert P_d\rvert\ge3N\). | `initialization.min_product_multiplier=3`; one pool expansion is attempted before failing. | OK |
@@ -128,11 +129,11 @@ hyperparameter rows.
 | `MOPSO` | Active components | \(\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen}\), \(F=\lvert\mathcal{D}_{frozen}\rvert\), \(0\le F\le D-1\). | `MOPSOOptimizer.active_components`; `experiment.frozen_components`. | OK |
 | `MOPSO` | Semantic distance in velocity | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\). | `semantic_velocity_delta`; used by `mopso._update_particle` for `delta_p` and `delta_l`. | OK |
 | `MOPSO` | Inertia schedule | \(\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\). Defaults: \(\omega_{max}=0.9,\omega_{min}=0.4\). | `mopso._update_particle`; `mopso.omega_max`, `mopso.omega_min`. | OK |
-| `MOPSO` | Turbulence schedule | \(p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\). Defaults: \(0.05\to0.01\). | `mopso._update_particle`; `mopso.p_tur_max`, `mopso.p_tur_min`. | OK |
+| `MOPSO` | Turbulence schedule | \(p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\). Defaults: \(0.07\to0.02\). | `mopso._update_particle`; `mopso.p_tur_max`, `mopso.p_tur_min`. | OK |
 | `MOPSO` | Velocity terms | \(s_{in}=\omega(t)v_{i,d}^{t}\); \(s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\); \(s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\); \(v_{raw}=s_{in}+s_{cog}+s_{soc}\). | `mopso._update_particle`; `c1`, `c2`. | OK |
 | `MOPSO` | Inertia selection weight | \(a_{in}=\omega(t)\lvert v_{i,d}^{t}\rvert\). | `s_in_weight`; used only for move-source weighting. | OK |
 | `MOPSO` | Velocity clamp | \(\hat v_{i,d}^{t+1}=\min(V_{max},\max(-V_{max},v_{raw}))\). | `mopso._update_particle`; `mopso.vmax`. | OK |
-| `MOPSO` | V-shaped transfer | \(q_{pso,i,d}^{t}=T_\alpha(\hat v)=\lvert\tanh(\alpha\hat v)\rvert\). | `math.tanh`; `mopso.alpha=0.5`. | OK |
+| `MOPSO` | V-shaped transfer | \(q_{pso,i,d}^{t}=T_\alpha(\hat v)=\lvert\tanh(\alpha\hat v)\rvert\). | `math.tanh`; `mopso.alpha=1`. | OK |
 | `MOPSO` | Effective candidate probability | \(q_{eff}=1-(1-q_{pso})(1-p_{tur})\). | `mopso._update_particle`; turbulence checked first, guided move second. | OK |
 | `MOPSO` | Per-generation change cap | \(\lvert M_i^t\rvert\le D_{max}\le\lvert\mathcal{D}_{active}\rvert\). | Candidate list is truncated by weighted sampling; frozen components are skipped. | OK |
 | `MOPSO` | Guided candidate validation | Accept candidate \(c\) only if \(\operatorname{SimCos}(E(c),E(target))>\operatorname{SimCos}(E(current),E(target))\) and \(\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\). | `_select_guided_candidate`; batched memory index. | OK |
@@ -148,7 +149,7 @@ hyperparameter rows.
 | `PBEST` | Utility tie-break | \(U(x)=w_1\tilde f_1(x)+w_2\tilde f_2(x)\). With \(w_1=w_2=0.5\), \(U(x)=\frac{f_1(x)+1+f_2(x)}{4}\). Ties keep previous pbest. | `mopso.utility`; `mopso.utility_weights`. | OK |
 | `TURB` | DistilBERT preliminary top-k | \(M_{tur}=3K_{cand}\). | `models.distilbert.top_k_multiplier=3`; router sends `preliminaryTopK`. | OK |
 | `TURB` | DistilBERT route condition | Use DistilBERT if \(L_w\ge1\land R_w\ge1\); otherwise use WordNet first with PPDB fallback. | `router._route_word_replacement`. | OK |
-| `TURB` | Variant count | \(\lvert C_K\rvert\le K_{cand}\). | `TurbulenceService`; `mopso.kcand=5`. | OK |
+| `TURB` | Variant count | \(\lvert C_K\rvert\le K_{cand}\). | `TurbulenceService`; `mopso.kcand=7`. | OK |
 | `SELECT` | Similarity filter | \(\mathcal{C}=\{x_i\in\mathcal{F}:\tau_{min}\le F_1(x_i)\le\tau_{max}\}\). | `rank_solutions`; `selection.tau_min`, `selection.tau_max`. | OK |
 | `SELECT` | Decision matrix | \(A=[a_{ij}]\in\mathbb{R}^{n_f\times2}\), \(a_{i1}=F_1(x_i)\), \(a_{i2}=F_2(x_i)\). | `rank_solutions`. | OK |
 | `SELECT` | Entropy column shift | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\). | `entropy_weights`. | OK |
@@ -217,15 +218,16 @@ hyperparameter rows.
 | `INIT` | Prompt reduction multiplier | \(M_{red}/N\) | 2 | `initialization.prompt_reduction_multiplier` | Reduces candidate prompts to `2N` before generation. | OK |
 | `INIT` | Generated sentence minimum | \(S_{min}\) | 1 | `initialization.generated_sentences_min` | Non-empty text implies at least one sentence in implementation; value is not separately checked. | OK with implicit enforcement |
 | `INIT` | Generated sentence maximum | \(S_{max}\) | 4 | `initialization.generated_sentences_max` | Rejects generated initial texts above sentence limit. | OK |
+| `EXEC` | Generated text fidelity threshold | \(\tau_{gen}^{min}\) | 0.15 | `generated_text_validation.tau_gen_min` | Rejects low-fidelity generated texts before accepting initialization or optimization changes. | OK |
 | `MOPSO` | Archive multiplier | \(A_{max}/N\) | 2 | `mopso.archive_multiplier` | Sets \(A_{max}=2N\). | OK |
 | `MOPSO` | Leader tournament size | \(q\) | 3 | `mopso.leader_tournament_size` | Tournament by crowding distance. | OK |
 | `MOPSO` | Max modified components | \(D_{max}\) | 1 | `mopso.dmax` | Caps changed active components per particle and generation. | OK |
-| `MOPSO` | Candidate variants | \(K_{cand}\) | 5 | `mopso.kcand` | Max variants from guided/turbulence operators. | OK |
+| `MOPSO` | Candidate variants | \(K_{cand}\) | 7 | `mopso.kcand` | Max variants from guided/turbulence operators. | OK |
 | `MOPSO` | Inertia endpoints | \(\omega_{max},\omega_{min}\) | `0.9`, `0.4` | `mopso.omega_max`, `mopso.omega_min` | Linear decreasing inertia. | OK |
 | `MOPSO` | Cognitive/social constants | \(c_1,c_2\) | `1.5`, `1.5` | `mopso.c1`, `mopso.c2` | Balance pbest and leader influence. | OK |
 | `MOPSO` | Velocity clamp | \(V_{max}\) | 4.0 | `mopso.vmax` | Bounds semantic velocity. | OK |
-| `MOPSO` | V-shaped scale | \(\alpha\) | 0.5 | `mopso.alpha` | Controls \(\lvert\tanh(\alpha v)\rvert\) saturation. | OK |
-| `MOPSO` | Turbulence endpoints | \(p_{tur}^{max},p_{tur}^{min}\) | `0.05`, `0.01` | `mopso.p_tur_max`, `mopso.p_tur_min` | Linear decreasing turbulence probability. | OK |
+| `MOPSO` | V-shaped scale | \(\alpha\) | 1 | `mopso.alpha` | Controls \(\lvert\tanh(\alpha v)\rvert\) saturation. | OK |
+| `MOPSO` | Turbulence endpoints | \(p_{tur}^{max},p_{tur}^{min}\) | `0.07`, `0.02` | `mopso.p_tur_max`, `mopso.p_tur_min` | Linear decreasing turbulence probability. | OK |
 | `MOPSO` | Retry count | \(K_{retry}\) | 0 | `mopso.k_retry` | No extra LLM retries; invalid candidates fail clearly. | OK |
 | `MOPSO` | Duplicate threshold | \(\tau_{dup}\) | 0.92 | `mopso.tau_dup` | Rejects near-duplicate component candidates. | OK |
 | `MOPSO` | Turbulence min fidelity | \(\tau_{tur}^{min}\) | 0.65 | `mopso.tau_tur_min` | Lower semantic similarity bound for turbulence. | OK |
