@@ -6,6 +6,53 @@ from pathlib import Path
 from typing import Any
 
 
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+def response_value(response: Any, key: str, default: Any = None) -> Any:
+    if isinstance(response, dict):
+        return response.get(key, default)
+    return getattr(response, key, default)
+
+
+def response_message_content(response: Any) -> str:
+    message = response_value(response, "message", {})
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    return str(getattr(message, "content", "") or "")
+
+
+def seconds_from_nanoseconds(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number / NANOSECONDS_PER_SECOND
+
+
+def ollama_usage_metadata(response: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for source_key, output_key in (
+        ("total_duration", "ollamaTotalDurationSeconds"),
+        ("load_duration", "ollamaLoadDurationSeconds"),
+        ("prompt_eval_duration", "ollamaPromptEvalDurationSeconds"),
+        ("eval_duration", "ollamaEvalDurationSeconds"),
+    ):
+        seconds = seconds_from_nanoseconds(response_value(response, source_key))
+        if seconds is not None:
+            metadata[output_key] = seconds
+            metadata[source_key] = response_value(response, source_key)
+    for source_key, output_key in (
+        ("prompt_eval_count", "promptEvalCount"),
+        ("eval_count", "evalCount"),
+    ):
+        value = response_value(response, source_key)
+        if value is not None:
+            metadata[output_key] = value
+            metadata[source_key] = value
+    return metadata
+
+
 class LLMCallLogger:
     def __init__(self, path: Path | None):
         self.path = path
@@ -60,7 +107,7 @@ class OllamaChatClient:
             format=response_format,
         )
         elapsed = time.perf_counter() - started
-        content = response["message"]["content"] if isinstance(response, dict) else response.message.content
+        content = response_message_content(response)
         self.logger.log(
             {
                 "task_id": task_id,
@@ -73,6 +120,7 @@ class OllamaChatClient:
                 "message_count": len(messages),
                 "elapsed_seconds": elapsed,
                 "content_chars": len(str(content)),
+                **ollama_usage_metadata(response),
             }
         )
         text = str(content).strip()
