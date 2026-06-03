@@ -27,7 +27,7 @@ def test_ollama_usage_metadata_converts_nanoseconds_and_token_counts():
 
 
 def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_path):
-    class FakeClient:
+    class StubClient:
         def chat(self, **_kwargs):
             return {
                 "message": {"content": "generated text"},
@@ -40,7 +40,7 @@ def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_pat
     client.host = "http://127.0.0.1:11434"
     client.timeout_seconds = 120
     client.think = False
-    client.client = FakeClient()
+    client.client = StubClient()
     client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
 
     text = client.chat(

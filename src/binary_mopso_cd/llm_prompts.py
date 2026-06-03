@@ -19,7 +19,55 @@ SYSTEM_JSON = (
     "Return only valid JSON. Do not include markdown, explanations, comments, or extra text."
 )
 
-SYSTEM_TEXT_GENERATION = """You are a plain-text generator for natural-disaster scenario messages.
+SYSTEM_ANCHOR_EXTRACTION = """You are an information extraction module for a prompt optimization algorithm.
+Task:
+Extract short semantic anchors from the reference text.
+Output format:
+Return only valid JSON with exactly these keys:
+{
+"entities": ["..."],
+"topics": ["..."],
+"actions": ["..."],
+"constraints": ["..."]
+}
+Rules:
+- Use the reference text as the main source.
+- Use the general domain only as context.
+- Do not invent specific facts that are not supported by the reference text.
+- Keep each item short.
+- Use 1 to 5 items per list.
+- Do not include explanations, markdown, numbering, or extra keys."""
+
+SYSTEM_POOL_GENERATION = """You generate one pool of semantic components for a prompt optimization algorithm.
+Task:
+Generate only the requested component type: roles, topics, or actions.
+Output format:
+Return only valid JSON with exactly this structure:
+{"items": ["...", "..."]}
+Rules:
+- The reference text is the main source, therefore every item must be associated with the reference text.
+- Use the general domain only as context.
+- Do not introduce new crisis concepts that are not supported by the reference text. Prefer reference-specific terms over generic emergency terms.
+- Use central reference-specific anchors when needed to preserve meaning, but do not copy the full reference sentence.
+- Keep each item short.
+- Do not include explanations, markdown, numbering, or extra keys."""
+
+SYSTEM_POOL_EXPANSION = """You expand one existing pool of semantic components.
+Task:
+Generate additional items for the requested component type.
+Output format:
+Return only valid JSON with exactly this structure:
+{"items": ["...", "..."]}
+Rules:
+- The reference text is the main source, therefore every new item must be associated with the reference text.
+- Use the general domain only as context.
+- Do not introduce new crisis concepts that are not supported by the reference text. Prefer reference-specific terms over generic emergency terms.
+- Use central reference-specific anchors when needed to preserve meaning, but do not copy the full reference sentence.
+- Do not repeat existing items.
+- Keep each item short.
+- Do not include explanations, markdown, numbering, or extra keys."""
+
+SYSTEM_TEXT_GENERATION = """You are a plain-text generator for social media messages related to crises and emergencies.
 You will receive one text-generation instruction from the user.
 Follow the instruction and generate exactly one final text message.
 Output rules:
@@ -49,33 +97,123 @@ ANCHOR_SCHEMA = {
     "additionalProperties": False,
 }
 
+POOL_ITEMS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": JSON_ARRAY_OF_STRINGS_SCHEMA,
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+COMPONENT_TYPE_LABELS = {
+    "role": "roles",
+    "topic": "topics",
+    "action": "actions",
+}
+
+COMPONENT_ADDITIONAL_INSTRUCTIONS = {
+    "role": (
+        "Return message-sender roles or stakeholder perspectives, not actions, topics, events, "
+        "or full social media messages. Prefer short noun phrases grounded in the reference text."
+    ),
+    "topic": (
+        "Return issue, event, or subject focuses, not message senders, actions, "
+        "or full social media messages. Prefer short noun phrases grounded in the reference text."
+    ),
+    "action": (
+        "Return communicative intents or discourse operations, not full social media messages. "
+        "Prefer verb phrases such as 'inform users about...', 'announce...', 'warn about...', "
+        "'direct users to...', 'request...', or 'report...'."
+    ),
+}
+
+
+def component_type_label(component: str) -> str:
+    normalized = str(component).strip().lower()
+    return COMPONENT_TYPE_LABELS.get(normalized, normalized)
+
+
+def component_additional_instruction(component: str) -> str:
+    normalized = str(component).strip().lower()
+    return COMPONENT_ADDITIONAL_INSTRUCTIONS.get(
+        normalized,
+        (
+            "Return short semantic component values for the requested component type, not full social media messages. "
+            "Prefer phrases grounded in the reference text."
+        ),
+    )
+
+
+def _json_block(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _general_domain(params: dict[str, Any]) -> str:
+    return str(params.get("domain") or params.get("general_domain") or "").strip()
+
+
+def _pool_quantity(params: dict[str, Any], key: str) -> int:
+    return int(params.get(key, params.get("quantity")))
+
 
 def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str]:
     if semantic_task == TASK_ANCHORS:
         return (
-            SYSTEM_JSON,
+            SYSTEM_ANCHOR_EXTRACTION,
             (
-                "Extract concise central semantic anchors from this reference text. "
-                "Return only valid JSON with exactly these keys: entities, topics, actions, constraints. "
-                "Each value must be a list of non-empty short strings without exact duplicates after normalization.\n"
-                f"Reference text: {params['reference_text']}"
+                "Reference text:\n"
+                f'"""{params["reference_text"]}"""\n\n'
+                "General domain:\n"
+                f"{_general_domain(params)}."
             ),
         )
-    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
-        component = params["component"]
-        quantity = int(params["quantity"])
-        existing = params.get("existing", [])
-        mode = "Expand" if semantic_task == TASK_POOL_EXPANSION else "Generate"
+    if semantic_task == TASK_POOL_GENERATION:
+        component = str(params["component"])
+        component_type = str(params.get("component_type") or component_type_label(component))
+        additional_instruction = str(
+            params.get("component_additional_instruction") or component_additional_instruction(component)
+        )
         return (
-            SYSTEM_JSON,
+            SYSTEM_POOL_GENERATION,
             (
-                f"{mode} a semantic pool for component {component!r}. "
-                f"Return a JSON array with exactly {quantity} unique short strings. "
-                f"Respect these maximum word counts: {json.dumps(params.get('max_words_by_component', {}), ensure_ascii=False)}. "
-                f"Domain: {params.get('domain')}. "
-                f"Reference text: {params.get('reference_text')}. "
-                f"Anchors: {json.dumps(params.get('anchors', []), ensure_ascii=False)}. "
-                f"Existing values to avoid: {json.dumps(existing, ensure_ascii=False)}."
+                "Reference text:\n"
+                f'"""{params.get("reference_text")}"""\n\n'
+                "General domain:\n"
+                f"{_general_domain(params)}.\n\n"
+                "Component to generate:\n"
+                f"{component_type}\n\n"
+                "Required number of items:\n"
+                f"{_pool_quantity(params, 'required_items')}\n\n"
+                "Semantic anchors for support:\n"
+                f"{_json_block(params.get('anchors', {}))}\n\n"
+                "Additional instruction:\n"
+                f"{additional_instruction}"
+            ),
+        )
+    if semantic_task == TASK_POOL_EXPANSION:
+        component = str(params["component"])
+        component_type = str(params.get("component_type") or component_type_label(component))
+        additional_instruction = str(
+            params.get("component_additional_instruction") or component_additional_instruction(component)
+        )
+        return (
+            SYSTEM_POOL_EXPANSION,
+            (
+                "Reference text:\n"
+                f'"""{params.get("reference_text")}"""\n\n'
+                "General domain:\n"
+                f"{_general_domain(params)}.\n\n"
+                "Component to expand:\n"
+                f"{component_type}\n\n"
+                "Required number of new items:\n"
+                f"{_pool_quantity(params, 'required_new_items')}\n\n"
+                "Existing items to avoid:\n"
+                f"{_json_block(params.get('existing', []))}\n\n"
+                "Semantic anchors for support:\n"
+                f"{_json_block(params.get('anchors', {}))}\n\n"
+                "Additional instruction:\n"
+                f"{additional_instruction}"
             ),
         )
     if semantic_task == TASK_INFLUENCE:
@@ -102,7 +240,9 @@ def response_format_for_task(semantic_task: str) -> Any:
         return None
     if semantic_task == TASK_ANCHORS:
         return ANCHOR_SCHEMA
-    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION, TASK_INFLUENCE}:
+    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
+        return POOL_ITEMS_SCHEMA
+    if semantic_task == TASK_INFLUENCE:
         return JSON_ARRAY_OF_STRINGS_SCHEMA
     return "json"
 
@@ -151,7 +291,16 @@ def parse_task_result(semantic_task: str, raw: str) -> Any:
                     items.append(text)
             anchors[key] = items
         return anchors
-    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION, TASK_INFLUENCE}:
+    if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
+        if isinstance(payload, dict):
+            items = payload.get("items")
+            if not isinstance(items, list):
+                raise ValueError(f"{semantic_task} must return a JSON object with an items array")
+            payload = items
+        if not isinstance(payload, list):
+            raise ValueError(f"{semantic_task} must return a JSON array")
+        return [str(item).strip() for item in payload if str(item).strip()]
+    if semantic_task == TASK_INFLUENCE:
         if isinstance(payload, dict):
             lists = [value for value in payload.values() if isinstance(value, list)]
             payload = lists[0] if lists else payload

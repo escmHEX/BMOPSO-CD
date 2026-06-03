@@ -3,7 +3,7 @@ experiment:
   iterations: 100
   runs: 3
   seed: 42
-  domain: "crisis and emergency-related social media messages"
+  domain: "social media messages related to crises and emergencies"
   components: ["role", "topic", "action"]
   frozen_components: []
 

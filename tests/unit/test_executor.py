@@ -15,7 +15,7 @@ def test_executor_ollama_contract_is_single_shot_stream_false(test_config, tmp_p
         TASK_SYNTHETIC_TEXT,
         {
             "prompt": (
-                "Generate a short natural-disaster scenario message using the following semantic components: "
+                "Generate a short social media message related to crises and emergencies using the following semantic components: "
                 "role = local official; topic = evacuation order; action = warn residents. "
                 "The generated message must follow the role, address the topic, and satisfy the action."
             ),

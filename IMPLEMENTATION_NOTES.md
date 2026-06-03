@@ -117,7 +117,7 @@ hyperparameter rows.
 | `INIT` | Pool base size | \(c=\max\left(2,\operatorname{round}\left(\left(\frac{4N}{\prod_{d\in\mathcal{D}}\alpha_d}\right)^{1/D}\right)\right)\). | `choose_pool_sizes`; `semantic_components.rules.*.alpha`. | OK |
 | `INIT` | Per-component target size | \(q_d=\lceil\alpha_d c\rceil\). Increase \(q_d\) in expansion order until \(\prod_d q_d\ge4N\). | `choose_pool_sizes`; `semantic_components.expansion_order`. | OK |
 | `INIT` | Minimum pool product | \(\prod_{d\in\mathcal{D}}\lvert P_d\rvert\ge3N\). | `initialization.min_product_multiplier=3`; one pool expansion is attempted before failing. | OK |
-| `INIT` | Candidate cap | \(M_{cand}=\min\left(\prod_d\lvert P_d\rvert,4N\right)\). | `_candidate_vectors`; lazy stratified sampling when product exceeds `4N`. | OK |
+| `INIT` | Candidate cap | \(M_{cand}=\min\left(\prod_d\lvert P_d\rvert,4N\right)\). | `_candidate_vectors`; balanced stratified sampling when product exceeds `4N`. | OK |
 | `INIT` | Prompt distance | \(d_P(P_i,P_j)=1-\operatorname{SimCos}(E(P_i),E(P_j))\). | `_reduce_by_prompt_diversity`; `text_type=prompt`. | OK |
 | `INIT` | Greedy max-min reduction | \(P^*=\arg\max_{P_i\in C\setminus S}\min_{P_j\in S}d_P(P_i,P_j)\). | `greedy_max_min_indices`; reduces to \(\min(2N,M_{cand})\). | OK |
 | `INIT` | Initial final ranking | Select top \(N\) from generated valid texts by descending \((f_1,\ score_{div,prompt})\). | `InitialPopulationBuilder.build`; fidelity is computed on generated texts, not prompts. | OK |
@@ -174,7 +174,7 @@ hyperparameter rows.
 | `MODEL` | Optimizer iterations | \(G\) | 100 | `experiment.iterations`, `--iterations` | Fixed stopping criterion. | OK |
 | `MODEL` | Independent runs | \(K_{runs}\) | 3 | `experiment.runs`, `--runs` | Repeated independent executions for comparability. | OK |
 | `MODEL` | Random seed | \(seed\) | 42 | `experiment.seed` | Reproducible sampling, archive tie breaks and tournaments. | Configurable implementation detail |
-| `MODEL` | Domain | \(D_{gen}\) | crisis and emergency-related social media messages | `experiment.domain` | Domain used in prompts and initial pools. | OK |
+| `MODEL` | Domain | \(D_{gen}\) | social media messages related to crises and emergencies | `experiment.domain` | Domain used in prompts and initial pools. | OK |
 | `MODEL` | Semantic components | \(\mathcal{D}\) | `role`, `topic`, `action` | `experiment.components`, `semantic_components.order` | Component dimensions of each individual. | OK |
 | `MODEL` | Frozen components | \(\mathcal{D}_{frozen}\) | empty | `experiment.frozen_components`, `--freeze-components` | Components skipped by MOPSO update, still present in prompt. | OK |
 | `PROMPT` | Component order | \(S\) order | `role`, `topic`, `action` | `semantic_components.order` | Stable deterministic prompt rendering. | OK |

@@ -11,6 +11,7 @@ from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.generated_text_validation import validate_generated_text
+from binary_mopso_cd.llm_prompts import component_additional_instruction, component_type_label
 from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
@@ -92,19 +93,25 @@ class InitialPopulationBuilder:
         existing: list[str] | None = None,
         task_name: str = TASK_POOL_GENERATION,
     ) -> list[str]:
+        is_expansion = task_name == TASK_POOL_EXPANSION
         route = RouteTask(
             uuid4().hex,
             "initialization",
             task_name,
             {
                 "component": component,
+                "component_type": component_type_label(component),
                 "quantity": quantity,
+                "required_items": quantity,
+                "required_new_items": quantity if is_expansion else None,
                 "reference_text": reference_text,
                 "anchors": anchors,
                 "central_anchor_count": central_anchor_count,
                 "domain": domain,
                 "existing": existing or [],
+                "component_additional_instruction": component_additional_instruction(component),
                 "max_words_by_component": dict(self.components.max_words),
+                "reference_word_count": word_count(reference_text),
             },
         )
         raw = self.executor.execute(self.router.route(route))
@@ -150,35 +157,27 @@ class InitialPopulationBuilder:
                 SemanticVector(dict(zip(components, combo, strict=True)))
                 for combo in materialize_product(values)
             ]
-        return self._stratified_lazy_vectors(components, values, total, limit)
+        return self._balanced_stratified_vectors(components, values, limit)
 
-    def _stratified_lazy_vectors(
+    def _balanced_stratified_vectors(
         self,
         components: list[str],
         values: list[list[str]],
-        total: int,
         limit: int,
     ) -> list[SemanticVector]:
+        combinations = materialize_product(values)
+        self.rng.shuffle(combinations)
+        counts = [{value: 0 for value in pool} for pool in values]
         vectors: list[SemanticVector] = []
-        seen_indices: set[int] = set()
-        for stratum in range(limit):
-            start = math.floor(stratum * total / limit)
-            end = max(start, math.floor((stratum + 1) * total / limit) - 1)
-            index = self.rng.randint(start, end)
-            if index in seen_indices:
-                index = start
-                while index <= end and index in seen_indices:
-                    index += 1
-            if index >= total or index in seen_indices:
-                continue
-            seen_indices.add(index)
-            vectors.append(vector_from_product_index(components, values, index))
-        fill_index = 0
-        while len(vectors) < limit and fill_index < total:
-            if fill_index not in seen_indices:
-                seen_indices.add(fill_index)
-                vectors.append(vector_from_product_index(components, values, fill_index))
-            fill_index += 1
+        while combinations and len(vectors) < limit:
+            best_index = min(
+                range(len(combinations)),
+                key=lambda idx: sum(counts[pos][value] for pos, value in enumerate(combinations[idx])),
+            )
+            combo = combinations.pop(best_index)
+            for pos, value in enumerate(combo):
+                counts[pos][value] += 1
+            vectors.append(SemanticVector(dict(zip(components, combo, strict=True))))
         return vectors
 
     def _reduce_by_prompt_diversity(
@@ -332,16 +331,6 @@ def materialize_product(values: list[list[str]]) -> list[tuple[str, ...]]:
     for pool in values:
         result = [prefix + (item,) for prefix in result for item in pool]
     return result
-
-
-def vector_from_product_index(components: list[str], values: list[list[str]], index: int) -> SemanticVector:
-    selected: list[str] = []
-    remainder = index
-    for pool in reversed(values):
-        selected.append(pool[remainder % len(pool)])
-        remainder //= len(pool)
-    selected.reverse()
-    return SemanticVector(dict(zip(components, selected, strict=True)))
 
 
 def greedy_max_min_indices(embeddings: np.ndarray, count: int) -> list[int]:
