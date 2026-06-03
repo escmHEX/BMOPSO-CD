@@ -14,6 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n", type=int, default=None, help="Population size.")
     parser.add_argument("--iterations", type=int, default=None, help="Optimizer iterations.")
     parser.add_argument("--runs", type=int, default=None, help="Independent runs.")
+    parser.add_argument("--seed", type=int, default=None, help="Base random seed.")
     parser.add_argument("--model", default=None, help="Default Ollama model.")
     parser.add_argument("--bert-model", default=None, help="SBERT alias or model name.")
     parser.add_argument("--outdir-base", type=Path, default=None, help="Output base directory.")
@@ -39,6 +40,8 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
         config.set("experiment.iterations", args.iterations)
     if args.runs is not None:
         config.set("experiment.runs", args.runs)
+    if args.seed is not None:
+        config.set("experiment.seed", args.seed)
     if args.model:
         config.set("ollama.default_model", args.model)
         for task in [
