@@ -3,7 +3,7 @@ experiment:
   iterations: 100
   runs: 3
   seed: 42
-  domain: "Natural-disaster and emergency scenario messages"
+  domain: "crisis and emergency-related social media messages"
   components: ["role", "topic", "action"]
   frozen_components: []
 
@@ -134,7 +134,7 @@ initialization:
   generated_sentences_max: 4
 
 generated_text_validation:
-  tau_gen_min: 0.15
+  tau_gen_min: 0.05
 
 mopso:
   archive_multiplier: 2

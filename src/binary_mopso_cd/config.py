@@ -167,7 +167,7 @@ class RuntimeConfig:
             raise ValueError("mopso.tau_tur_min must not exceed mopso.tau_tur_max")
         if int(self.get("mopso.k_retry", 0)) != 0:
             raise ValueError("mopso.k_retry must remain 0 for the specified strategy")
-        tau_gen_min = float(self.get("generated_text_validation.tau_gen_min", 0.15))
+        tau_gen_min = float(self.get("generated_text_validation.tau_gen_min", 0.05))
         if tau_gen_min < -1.0 or tau_gen_min > 1.0:
             raise ValueError("generated_text_validation.tau_gen_min must be in [-1, 1]")
         if int(self.get("initialization.candidate_multiplier", 4)) <= 0:

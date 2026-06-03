@@ -179,7 +179,7 @@ class BinaryMOPSOCDEngine:
         self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
-        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.15))
+        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
         checkpoint = CheckpointSettings.from_config(config)
         self.archive = ExternalArchive(max_size=self.mopso.archive_multiplier * config.n, rng=rng)
         self.pbest_updater = PBestUpdater(self.mopso.utility_weights)

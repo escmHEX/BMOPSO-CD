@@ -57,7 +57,7 @@ def test_generated_text_validator_reports_expected_reasons():
         == REASON_DUPLICATE
     )
     assert validate_generated_text("One. Two.", "reference", max_sentences=1).reason == REASON_SENTENCE_LIMIT
-    assert validate_generated_text("plausible text", "reference", f1=0.1).reason == REASON_LOW_FIDELITY
+    assert validate_generated_text("plausible text", "reference", f1=0.01).reason == REASON_LOW_FIDELITY
     assert (
         validate_generated_text("I cannot assist you with that request", "reference", f1=1.0).reason
         == REASON_REFUSAL_PHRASE

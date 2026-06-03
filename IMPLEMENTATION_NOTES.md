@@ -113,7 +113,7 @@ hyperparameter rows.
 | `EXEC` | LLM execution | \(y=LLM(S_{\tau},U_{\tau}(p');\theta)\). | `SemanticTaskExecutor`; `ollama.stream=false`; no conversational history is retained. | OK |
 | `EXEC` | Embedding execution | \(e=E(s)\in\mathbb{R}^{d_z}\). | `EmbeddingService.encode`; SBERT model from `models.sbert.*`. | OK |
 | `EXEC` | Synthetic text generation | \(G_i=LLM(S_{gen},P_i;\theta_{gen})\), with \(T_{gen}=0.75\) and \(p_{gen}=0.95\). | `llm_prompts.py`, `TASK_SYNTHETIC_TEXT`; `router.llm_params.synthetic_text_generation`. | OK |
-| `EXEC` | Generated text feasibility | Accept generated text only if it is non-empty, not the reference, not a refusal phrase, and \(f_1\ge\tau_{gen}^{min}\). Initialization also enforces duplicate and sentence-limit filters. | `generated_text_validation.validate_generated_text`; `generated_text_validation.tau_gen_min=0.15`. | OK |
+| `EXEC` | Generated text feasibility | Accept generated text only if it is non-empty, not the reference, not a refusal phrase, and \(f_1\ge\tau_{gen}^{min}\). Initialization also enforces duplicate and sentence-limit filters. | `generated_text_validation.validate_generated_text`; `generated_text_validation.tau_gen_min=0.05`. | OK |
 | `INIT` | Pool base size | \(c=\max\left(2,\operatorname{round}\left(\left(\frac{4N}{\prod_{d\in\mathcal{D}}\alpha_d}\right)^{1/D}\right)\right)\). | `choose_pool_sizes`; `semantic_components.rules.*.alpha`. | OK |
 | `INIT` | Per-component target size | \(q_d=\lceil\alpha_d c\rceil\). Increase \(q_d\) in expansion order until \(\prod_d q_d\ge4N\). | `choose_pool_sizes`; `semantic_components.expansion_order`. | OK |
 | `INIT` | Minimum pool product | \(\prod_{d\in\mathcal{D}}\lvert P_d\rvert\ge3N\). | `initialization.min_product_multiplier=3`; one pool expansion is attempted before failing. | OK |
@@ -174,7 +174,7 @@ hyperparameter rows.
 | `MODEL` | Optimizer iterations | \(G\) | 100 | `experiment.iterations`, `--iterations` | Fixed stopping criterion. | OK |
 | `MODEL` | Independent runs | \(K_{runs}\) | 3 | `experiment.runs`, `--runs` | Repeated independent executions for comparability. | OK |
 | `MODEL` | Random seed | \(seed\) | 42 | `experiment.seed` | Reproducible sampling, archive tie breaks and tournaments. | Configurable implementation detail |
-| `MODEL` | Domain | \(D_{gen}\) | Natural-disaster and emergency scenario messages | `experiment.domain` | Domain used in prompts and initial pools. | OK |
+| `MODEL` | Domain | \(D_{gen}\) | crisis and emergency-related social media messages | `experiment.domain` | Domain used in prompts and initial pools. | OK |
 | `MODEL` | Semantic components | \(\mathcal{D}\) | `role`, `topic`, `action` | `experiment.components`, `semantic_components.order` | Component dimensions of each individual. | OK |
 | `MODEL` | Frozen components | \(\mathcal{D}_{frozen}\) | empty | `experiment.frozen_components`, `--freeze-components` | Components skipped by MOPSO update, still present in prompt. | OK |
 | `PROMPT` | Component order | \(S\) order | `role`, `topic`, `action` | `semantic_components.order` | Stable deterministic prompt rendering. | OK |
@@ -219,7 +219,7 @@ hyperparameter rows.
 | `INIT` | Prompt reduction multiplier | \(M_{red}/N\) | 2 | `initialization.prompt_reduction_multiplier` | Reduces candidate prompts to `2N` before generation. | OK |
 | `INIT` | Generated sentence minimum | \(S_{min}\) | 1 | `initialization.generated_sentences_min` | Non-empty text implies at least one sentence in implementation; value is not separately checked. | OK with implicit enforcement |
 | `INIT` | Generated sentence maximum | \(S_{max}\) | 4 | `initialization.generated_sentences_max` | Rejects generated initial texts above sentence limit. | OK |
-| `EXEC` | Generated text fidelity threshold | \(\tau_{gen}^{min}\) | 0.15 | `generated_text_validation.tau_gen_min` | Rejects low-fidelity generated texts before accepting initialization or optimization changes. | OK |
+| `EXEC` | Generated text fidelity threshold | \(\tau_{gen}^{min}\) | 0.05 | `generated_text_validation.tau_gen_min` | Rejects low-fidelity generated texts before accepting initialization or optimization changes. | OK |
 | `MOPSO` | Archive multiplier | \(A_{max}/N\) | 2 | `mopso.archive_multiplier` | Sets \(A_{max}=2N\). | OK |
 | `MOPSO` | Leader tournament size | \(q\) | 3 | `mopso.leader_tournament_size` | Tournament by crowding distance. | OK |
 | `MOPSO` | Max modified components | \(D_{max}\) | 1 | `mopso.dmax` | Caps changed active components per particle and generation. | OK |

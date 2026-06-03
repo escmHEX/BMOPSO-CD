@@ -33,7 +33,7 @@ class InitialPopulationBuilder:
         self.rng = rng
         self.components = ComponentSettings.from_config(config)
         self.settings = InitializationSettings.from_config(config)
-        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.15))
+        self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
 
     def build(self, reference_text: str) -> list[Solution]:
         n = self.config.n

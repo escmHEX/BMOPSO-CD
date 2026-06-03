@@ -49,7 +49,7 @@ def validate_generated_text(
     reference_text: str,
     accepted_text_keys: set[str] | None = None,
     f1: float | None = None,
-    tau_gen_min: float = 0.15,
+    tau_gen_min: float = 0.05,
     max_sentences: int | None = None,
 ) -> GeneratedTextValidationResult:
     if not isinstance(text, str):
