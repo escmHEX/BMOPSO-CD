@@ -51,6 +51,19 @@ def test_progress_logger_writes_generation_line(test_config, tmp_path):
     assert "spread=NA" in text
 
 
+def test_progress_logger_writes_stage_and_generation_start(test_config, tmp_path):
+    test_config.set("logging.console", False)
+    logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
+
+    logger.stage(3, 6, "Construyendo poblacion inicial")
+    logger.generation_start(2, 5)
+    logger.close()
+
+    text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
+    assert "3/6 Construyendo poblacion inicial" in text
+    assert "run 1/1 | generation 2/5 started" in text
+
+
 def test_progress_logger_records_errors(test_config, tmp_path):
     test_config.set("logging.console", False)
     logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)

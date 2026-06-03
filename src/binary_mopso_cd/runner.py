@@ -34,9 +34,11 @@ class ExperimentRunner:
         outdir = create_run_dir(Path(str(config.get("runtime.outdir_base", "exec"))), run_index)
         progress = ProgressLogger(config, outdir, run_index or 1, config.runs)
         try:
+            progress.stage(1, 6, "Preparando directorio de salida")
             progress.start(config.n, config.iterations, outdir)
             (outdir / "reference.txt").write_text(self.reference_text, encoding="utf-8")
             write_config(outdir / "config_effective.yaml", config.as_dict())
+            progress.stage(2, 6, "Cargando recursos semanticos")
             router = SemanticRouter(config)
             executor = SemanticTaskExecutor(config, outdir=outdir)
             resume_path = config.get("runtime.resume_from")
@@ -48,6 +50,7 @@ class ExperimentRunner:
                     executor.embedding_service.cache.load(cache_path)
             rng = rng_from_text(config.seed, checkpoint_payload.get("rng_state") if checkpoint_payload else None)
             if checkpoint_payload:
+                progress.stage(3, 6, "Cargando poblacion desde checkpoint")
                 initial_population = [solution_from_dict(item) for item in checkpoint_payload["population"]]
                 pbest_state = [solution_from_dict(item) for item in checkpoint_payload["pbest"]]
                 archive_state = [solution_from_dict(item) for item in checkpoint_payload["archive"]]
@@ -56,6 +59,7 @@ class ExperimentRunner:
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
+                progress.stage(3, 6, "Construyendo poblacion inicial")
                 initial_builder = InitialPopulationBuilder(config, router, executor, rng)
                 initial_population = initial_builder.build(self.reference_text)
                 pbest_state = None
@@ -65,6 +69,7 @@ class ExperimentRunner:
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             engine = BinaryMOPSOCDEngine(config, router, executor, rng, outdir, self.reference_text, progress)
+            progress.stage(4, 6, "Ejecutando MOPSO-CD")
             population, archive = engine.run(
                 initial_population,
                 start_generation=start_generation,
@@ -72,6 +77,7 @@ class ExperimentRunner:
                 archive_state=archive_state,
                 component_memory=component_memory,
             )
+            progress.stage(5, 6, "Escribiendo frente y seleccion final")
             pareto = non_dominated(archive.solutions)
             write_solutions(outdir / "population_evaluated.json", population)
             write_solutions(outdir / "pareto_front.json", pareto)
@@ -102,6 +108,7 @@ class ExperimentRunner:
                 write_solutions(outdir / "final_selection_hybrid.json", [item.solution for item in selected])
             executor.save_caches()
             timer.write(outdir / "runtime.txt", {"run_index": run_index or 1})
+            progress.stage(6, 6, "Finalizando corrida")
             progress.finish(outdir)
             return outdir
         except Exception:

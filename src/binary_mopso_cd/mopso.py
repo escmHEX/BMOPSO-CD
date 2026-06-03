@@ -200,6 +200,8 @@ class BinaryMOPSOCDEngine:
         monitor_rows: list[dict[str, Any]] = []
         try:
             for generation in range(start_generation + 1, self.config.iterations + 1):
+                if self.progress_logger is not None:
+                    self.progress_logger.generation_start(generation, self.config.iterations)
                 next_population = []
                 for index, particle in enumerate(population):
                     leader = self.archive.select_leader(self.mopso.leader_tournament_size)

@@ -44,6 +44,19 @@ class ProgressLogger:
             outdir,
         )
 
+    def stage(self, index: int, total: int, label: str) -> None:
+        self.info("%s/%s %s", index, total, label)
+
+    def generation_start(self, generation: int, total_generations: int) -> None:
+        self.info(
+            "run %s/%s | generation %s/%s started | elapsed=%s",
+            self.run_index,
+            self.total_runs,
+            generation,
+            total_generations,
+            format_elapsed(time.perf_counter() - self.started),
+        )
+
     def generation(
         self,
         generation: int,
@@ -80,10 +93,16 @@ class ProgressLogger:
     def exception(self, message: str, *args: Any) -> None:
         if self.enabled:
             self.logger.exception(message, *args)
+            self.flush()
 
     def info(self, message: str, *args: Any) -> None:
         if self.enabled:
             self.logger.info(message, *args)
+            self.flush()
+
+    def flush(self) -> None:
+        for handler in self.logger.handlers:
+            handler.flush()
 
     def close(self) -> None:
         for handler in list(self.logger.handlers):
