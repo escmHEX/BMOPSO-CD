@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from binary_mopso_cd.component_specs import component_spec
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
     TASK_INFLUENCE,
@@ -13,11 +14,6 @@ from binary_mopso_cd.router import (
 )
 from binary_mopso_cd.utils import canonical_text
 
-
-SYSTEM_JSON = (
-    "You are a semantic task executor for emergency-message prompt optimization. "
-    "Return only valid JSON. Do not include markdown, explanations, comments, or extra text."
-)
 
 SYSTEM_ANCHOR_EXTRACTION = """You are an information extraction module for a prompt optimization algorithm.
 Task:
@@ -78,6 +74,28 @@ Output rules:
 - Do not use quotation marks, hashtags, URLs, usernames, placeholders, tags, or special markers.
 - Limit the message to between 1 and 4 sentences.
 - Return only the final message."""
+
+SEMANTIC_MOVE_SYSTEM_PROMPT = """You are a prompt-component editor for structured prompt optimization.
+Task:
+Generate candidate replacements for exactly one semantic prompt component.
+Each candidate must move the current component semantically toward the target component.
+General rules:
+- Return only candidate components.
+- Keep the same component type requested by the user.
+- Each candidate must have 2-8 words.
+- The other components are only there to give you context.
+- Do not copy the current component exactly.
+- Avoid copying the target component exactly, but semantic closeness is more important than lexical novelty.
+- Candidates must be distinct from each other.
+- Do not explain.
+- Do not use quotes.
+- Do not add titles, labels, comments, or extra text.
+- Return exactly the number of candidates requested by the user.
+- Use numbered lines with this format:
+1) candidate
+2) candidate
+3) candidate
+..."""
 
 
 JSON_ARRAY_OF_STRINGS_SCHEMA = {
@@ -157,6 +175,27 @@ def _pool_quantity(params: dict[str, Any], key: str) -> int:
     return int(params.get(key, params.get("quantity")))
 
 
+def _first_param(params: dict[str, Any], *keys: str, default: Any = "") -> Any:
+    for key in keys:
+        value = params.get(key)
+        if value is not None:
+            return value
+    return default
+
+
+def _format_other_components(value: Any) -> str:
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        return _json_block(value)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        return _json_block(value)
+    text = str(value or "").strip()
+    return text or "{}"
+
+
 def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str]:
     if semantic_task == TASK_ANCHORS:
         return (
@@ -217,17 +256,45 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             ),
         )
     if semantic_task == TASK_INFLUENCE:
+        component_name = str(_first_param(params, "componentName", "component_name", "component")).strip()
+        spec = component_spec(component_name)
+        num_candidates = int(_first_param(params, "numCandidates", "num_candidates", "max_candidates", default=5))
+        component_definition = str(
+            _first_param(params, "componentDefinition", "component_definition", default=spec.definition)
+        ).strip()
+        current_component = str(_first_param(params, "currentComponent", "current_component", "current")).strip()
+        target_component = str(_first_param(params, "targetComponent", "target_component", "target")).strip()
+        other_components = _format_other_components(
+            _first_param(params, "otherComponents", "other_components", default={})
+        )
+        reference_text = str(_first_param(params, "referenceText", "reference_text")).strip()
+        additional_instruction = str(
+            _first_param(
+                params,
+                "componentAdditionalInstruction",
+                "component_additional_instruction",
+                default=spec.influence_instruction,
+            )
+        ).strip()
         return (
-            SYSTEM_JSON,
+            SEMANTIC_MOVE_SYSTEM_PROMPT,
             (
-                "Generate semantic component candidates that move the current component toward the target. "
-                f"Return only a JSON array with at most {int(params.get('max_candidates', 5))} short strings. "
-                "Do not return an object, keys, labels, explanations, or nested structures. "
-                "Do not copy the current or target literally. "
-                f"Component name: {params.get('component')}. "
-                f"Current: {params.get('current')}. "
-                f"Target: {params.get('target')}. "
-                f"Reference text: {params.get('reference_text')}."
+                "Number of candidates: "
+                f"{num_candidates}\n\n"
+                "Component: "
+                f"{component_name}\n"
+                "Definition: "
+                f"{component_definition}\n\n"
+                "Current: "
+                f"{current_component}\n"
+                "Target: "
+                f"{target_component}\n\n"
+                "Other components:\n"
+                f"{other_components}\n\n"
+                "Reference text:\n"
+                f"{reference_text}\n\n"
+                "Additional important instruction:\n"
+                f"{additional_instruction}"
             ),
         )
     if semantic_task == TASK_SYNTHETIC_TEXT:
@@ -243,7 +310,7 @@ def response_format_for_task(semantic_task: str) -> Any:
     if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
         return POOL_ITEMS_SCHEMA
     if semantic_task == TASK_INFLUENCE:
-        return JSON_ARRAY_OF_STRINGS_SCHEMA
+        return None
     return "json"
 
 
@@ -268,6 +335,8 @@ def parse_json_payload(raw: str) -> Any:
 def parse_task_result(semantic_task: str, raw: str) -> Any:
     if semantic_task == TASK_SYNTHETIC_TEXT:
         return raw.strip()
+    if semantic_task == TASK_INFLUENCE:
+        return parse_influence_candidates(raw)
     payload = parse_json_payload(raw)
     if semantic_task == TASK_ANCHORS:
         if not isinstance(payload, dict):
@@ -300,11 +369,38 @@ def parse_task_result(semantic_task: str, raw: str) -> Any:
         if not isinstance(payload, list):
             raise ValueError(f"{semantic_task} must return a JSON array")
         return [str(item).strip() for item in payload if str(item).strip()]
-    if semantic_task == TASK_INFLUENCE:
+    return payload
+
+
+def parse_influence_candidates(raw: str) -> list[str]:
+    text = raw.strip()
+    if not text:
+        return []
+    if text.startswith(("[", "{")) or "```" in text:
+        try:
+            payload = parse_json_payload(text)
+        except ValueError:
+            payload = None
         if isinstance(payload, dict):
             lists = [value for value in payload.values() if isinstance(value, list)]
             payload = lists[0] if lists else payload
-        if not isinstance(payload, list):
-            raise ValueError(f"{semantic_task} must return a JSON array")
-        return [str(item).strip() for item in payload if str(item).strip()]
-    return payload
+        if isinstance(payload, list):
+            return _clean_candidate_lines(str(item) for item in payload)
+    return _clean_candidate_lines(text.splitlines())
+
+
+def _clean_candidate_lines(lines: Any) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        value = str(line).strip()
+        if not value or value == "...":
+            continue
+        value = re.sub(r"^\s*\d+\s*[\).:-]\s*", "", value).strip()
+        value = value.strip(" \t\r\n\"'`")
+        normalized = canonical_text(value)
+        if not normalized or normalized in seen or normalized == "candidate":
+            continue
+        seen.add(normalized)
+        candidates.append(value)
+    return candidates

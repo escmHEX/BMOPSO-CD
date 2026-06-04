@@ -31,6 +31,16 @@ def test_router_influence_schedule_uses_zero_based_index(test_config):
     assert last.alg_params["top_p"] == pytest.approx(0.90)
 
 
+def test_router_influence_schedule_accepts_total_generations_alias(test_config):
+    router = SemanticRouter(test_config)
+    last = router.route(
+        RouteTask("1", "test", TASK_INFLUENCE, {"iteration": 99, "totalGenerations": 100})
+    )
+
+    assert last.alg_params["temperature"] == pytest.approx(0.50)
+    assert last.alg_params["top_p"] == pytest.approx(0.90)
+
+
 def test_checkpoint_interval_validation_only_when_enabled(test_config):
     test_config.set("checkpoint.enabled", False)
     test_config.set("checkpoint.interval", 0)

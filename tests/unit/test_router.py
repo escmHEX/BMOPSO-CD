@@ -45,6 +45,29 @@ def test_router_word_replacement_uses_default_kcand_when_missing(test_config):
     assert execution.alg_params["preliminary_top_k"] == 21
 
 
+def test_router_word_replacement_accepts_strategy_context_fields(test_config):
+    router = SemanticRouter(test_config)
+    task = RouteTask(
+        "1",
+        "test",
+        TASK_WORD_REPLACEMENT,
+        {
+            "component": "public safety alert",
+            "componentType": "topic",
+            "targetWord": "safety",
+            "targetWordLeftTokens": 1,
+            "targetWordRightTokens": 1,
+            "target_index": 1,
+            "maxVariants": 7,
+        },
+    )
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_DISTILBERT
+    assert execution.alg_params["max_variants"] == 7
+    assert execution.alg_params["preliminary_top_k"] == 21
+
+
 def test_router_word_replacement_fallback_at_boundary(test_config):
     router = SemanticRouter(test_config)
     task = RouteTask(

@@ -8,6 +8,7 @@ import pytest
 
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.mopso import (
+    BinaryMOPSOCDEngine,
     ExternalArchive,
     crowding_distance,
     dominates,
@@ -31,6 +32,42 @@ class StubEmbeddingService:
 
     def encode(self, texts: list[str], text_type: str) -> np.ndarray:
         return np.asarray([self.vectors[text] for text in texts], dtype=float)
+
+
+class PassthroughRouter:
+    def route(self, task):
+        return task
+
+
+class StubTurbulenceProvider:
+    def __init__(self):
+        self.preferred_pos: tuple[str, ...] | None = None
+
+    def modifiable_units(self, _text: str, preferred_pos: tuple[str, ...] = ()) -> list[dict]:
+        self.preferred_pos = preferred_pos
+        return [
+            {
+                "text": "safety",
+                "lemma": "safety",
+                "pos": "NOUN",
+                "span": [7, 13],
+                "leftTokens": 1,
+                "rightTokens": 1,
+                "target_index": 1,
+                "tokens": ["public", "safety", "alert"],
+            }
+        ]
+
+
+class StubExecutor:
+    def __init__(self):
+        self.embedding_service = StubEmbeddingService({})
+        self.turbulence_provider = StubTurbulenceProvider()
+        self.executed_task = None
+
+    def execute(self, task):
+        self.executed_task = task
+        return ["public emergency alert"]
 
 
 def test_dominance_and_utility():
@@ -116,3 +153,71 @@ def test_unique_signature_evaluation_deduplicates_before_f2_and_propagates_resul
     assert second.objectives.f2 == pytest.approx(1.0)
     assert third.objectives.f2 == pytest.approx(1.5)
     assert duplicate.embedding == first.embedding
+
+
+def test_mopso_influence_params_use_component_spec_and_strategy_fields(test_config, tmp_path):
+    executor = StubExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "Flooded roads near the bridge need urgent support.",
+    )
+    particle = Solution(
+        SemanticVector({"role": "local official", "topic": "flooded roads", "action": "request aid"}),
+        "prompt",
+        "text",
+    )
+
+    params = engine._influence_task_params(
+        "action",
+        "request aid",
+        "warn residents about flooding",
+        particle,
+        generation=1,
+    )
+
+    assert params["numCandidates"] == 7
+    assert params["componentName"] == "action"
+    assert params["componentDefinition"] == (
+        "Communicative intent or discourse operation that indicates how the message communicates information. "
+        "It must be a verb phrase, not a resource, program, service, or support type."
+    )
+    assert params["currentComponent"] == "request aid"
+    assert params["targetComponent"] == "warn residents about flooding"
+    assert params["otherComponents"] == {"role": "local official", "topic": "flooded roads"}
+    assert params["referenceText"] == "Flooded roads near the bridge need urgent support."
+    assert params["componentAdditionalInstruction"].startswith("Keep each candidate as a communicative verb phrase.")
+    assert params["iteration"] == 0
+    assert params["totalGenerations"] == test_config.iterations
+
+
+def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp_path):
+    executor = StubExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine._select_turbulence_candidate = lambda _component, _current, raw_candidates: raw_candidates[0]
+
+    result = engine._turbulence_candidate("topic", "public safety alert")
+
+    assert result == "public emergency alert"
+    assert executor.turbulence_provider.preferred_pos == ("NOUN", "PROPN", "ADJ")
+    params = executor.executed_task.task_params
+    assert params["component"] == "public safety alert"
+    assert params["componentType"] == "topic"
+    assert params["targetWord"] == "safety"
+    assert params["targetLemma"] == "safety"
+    assert params["targetPos"] == "NOUN"
+    assert params["targetSpan"] == [7, 13]
+    assert params["targetWordLeftTokens"] == 1
+    assert params["targetWordRightTokens"] == 1
+    assert params["maxVariants"] == 7
+    assert params["target_index"] == 1

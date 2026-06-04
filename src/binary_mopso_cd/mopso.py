@@ -12,6 +12,7 @@ import numpy as np
 
 from binary_mopso_cd.checkpoint import CheckpointManager
 from binary_mopso_cd.component_memory import ComponentMemoryIndex
+from binary_mopso_cd.component_specs import component_spec
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
@@ -28,7 +29,6 @@ from binary_mopso_cd.router import (
     SemanticRouter,
 )
 from binary_mopso_cd.services.embedding import EmbeddingService
-from binary_mopso_cd.services.turbulence import tokenize_component
 from binary_mopso_cd.settings import CheckpointSettings, ComponentSettings, MOPSOSettings
 from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, word_count
 
@@ -401,32 +401,69 @@ class BinaryMOPSOCDEngine:
             uuid4().hex,
             "optimization",
             TASK_INFLUENCE,
-            {
-                "component": component,
-                "current": current,
-                "target": target,
-                "reference_text": self.reference_text,
-                "max_candidates": self.mopso.kcand,
-                "iteration": generation - 1,
-                "iterations": self.config.iterations,
-            },
+            self._influence_task_params(component, current, target, particle, generation),
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
         return self._select_guided_candidate(component, current, target, raw_candidates)
 
+    def _influence_task_params(
+        self,
+        component: str,
+        current: str,
+        target: str,
+        particle: Solution,
+        generation: int,
+    ) -> dict[str, Any]:
+        spec = component_spec(component)
+        other_components = {
+            name: value
+            for name, value in particle.vector.components.items()
+            if name != component
+        }
+        return {
+            "numCandidates": self.mopso.kcand,
+            "componentName": spec.name,
+            "componentDefinition": spec.definition,
+            "currentComponent": current,
+            "targetComponent": target,
+            "otherComponents": other_components,
+            "referenceText": self.reference_text,
+            "componentAdditionalInstruction": spec.influence_instruction,
+            "iteration": generation - 1,
+            "totalGenerations": self.config.iterations,
+            "component": component,
+            "current": current,
+            "target": target,
+            "reference_text": self.reference_text,
+            "max_candidates": self.mopso.kcand,
+            "iterations": self.config.iterations,
+        }
+
     def _turbulence_candidate(self, component: str, current: str) -> str | None:
-        tokens = tokenize_component(current)
-        if not tokens:
+        spec = component_spec(component)
+        units = self.executor.turbulence_provider.modifiable_units(current, spec.preferred_turbulence_pos)
+        if not units:
             return None
-        target_index = self.rng.randrange(len(tokens))
+        selected = self.rng.choice(units)
         route = RouteTask(
             uuid4().hex,
             "optimization",
             TASK_WORD_REPLACEMENT,
             {
+                "component": current,
+                "componentType": spec.name,
+                "targetWord": selected["text"],
+                "targetLemma": selected["lemma"],
+                "targetPos": selected["pos"],
+                "targetSpan": selected["span"],
+                "targetWordLeftTokens": selected["leftTokens"],
+                "targetWordRightTokens": selected["rightTokens"],
+                "maxVariants": self.mopso.kcand,
                 "text": current,
-                "tokens": tokens,
-                "target_index": target_index,
+                "tokens": selected["tokens"],
+                "target_index": selected["target_index"],
+                "target_lemma": selected["lemma"],
+                "target_pos": selected["pos"],
                 "max_variants": self.mopso.kcand,
             },
         )

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from binary_mopso_cd.llm_prompts import build_messages, parse_task_result, response_format_for_task
-from binary_mopso_cd.router import TASK_ANCHORS, TASK_POOL_EXPANSION, TASK_POOL_GENERATION
+from binary_mopso_cd.llm_prompts import (
+    SEMANTIC_MOVE_SYSTEM_PROMPT,
+    build_messages,
+    parse_task_result,
+    response_format_for_task,
+)
+from binary_mopso_cd.router import TASK_ANCHORS, TASK_INFLUENCE, TASK_POOL_EXPANSION, TASK_POOL_GENERATION
 
 
 DOMAIN = "social media messages related to crises and emergencies"
@@ -97,3 +102,65 @@ def test_pool_schema_and_parser_prefer_items_object_but_accept_legacy_array():
     assert parse_task_result(TASK_POOL_EXPANSION, '["legacy a", "legacy b"]') == ["legacy a", "legacy b"]
     with pytest.raises(ValueError, match="items array"):
         parse_task_result(TASK_POOL_GENERATION, '{"values": ["a"]}')
+
+
+def test_influence_messages_match_strategy_contract():
+    system, user = build_messages(
+        TASK_INFLUENCE,
+        {
+            "numCandidates": 3,
+            "componentName": "action",
+            "componentDefinition": (
+                "Communicative intent or discourse operation that indicates how the message communicates information. "
+                "It must be a verb phrase, not a resource, program, service, or support type."
+            ),
+            "currentComponent": "ask for aid",
+            "targetComponent": "warn residents about flooding",
+            "otherComponents": {"role": "local official", "topic": "flooded roads"},
+            "referenceText": "Flooded roads near the bridge need urgent support.",
+            "componentAdditionalInstruction": (
+                "Keep each candidate as a communicative verb phrase. Preserve the target object when possible. If you "
+                "change it, use only a close paraphrase supported by the reference text. Do not replace it with a narrower "
+                "or broader resource, program, service, entity, or topic."
+            ),
+        },
+    )
+
+    assert system == SEMANTIC_MOVE_SYSTEM_PROMPT
+    assert user == (
+        "Number of candidates: 3\n\n"
+        "Component: action\n"
+        "Definition: Communicative intent or discourse operation that indicates how the message communicates information. "
+        "It must be a verb phrase, not a resource, program, service, or support type.\n\n"
+        "Current: ask for aid\n"
+        "Target: warn residents about flooding\n\n"
+        "Other components:\n"
+        "{\n"
+        '  "role": "local official",\n'
+        '  "topic": "flooded roads"\n'
+        "}\n\n"
+        "Reference text:\n"
+        "Flooded roads near the bridge need urgent support.\n\n"
+        "Additional important instruction:\n"
+        "Keep each candidate as a communicative verb phrase. Preserve the target object when possible. If you "
+        "change it, use only a close paraphrase supported by the reference text. Do not replace it with a narrower "
+        "or broader resource, program, service, entity, or topic."
+    )
+
+
+def test_influence_uses_plain_text_response_and_parses_numbered_lines():
+    assert response_format_for_task(TASK_INFLUENCE) is None
+    raw = "1) warn residents about flooding\n2. alert locals about flood risk\n3) notify bridge users"
+
+    assert parse_task_result(TASK_INFLUENCE, raw) == [
+        "warn residents about flooding",
+        "alert locals about flood risk",
+        "notify bridge users",
+    ]
+
+
+def test_influence_parser_accepts_legacy_json_array():
+    assert parse_task_result(TASK_INFLUENCE, '[" warn residents ", "alert locals"]') == [
+        "warn residents",
+        "alert locals",
+    ]

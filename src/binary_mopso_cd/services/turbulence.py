@@ -9,6 +9,7 @@ from binary_mopso_cd.utils import canonical_text, unique_preserve_order
 
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
+ALLOWED_TURBULENCE_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV"}
 
 
 def tokenize_component(text: str) -> list[str]:
@@ -149,10 +150,18 @@ class TurbulenceService:
     def distilbert_candidates(self, text: str, target_index: int, preliminary_top_k: int, max_variants: int) -> list[str]:
         return self.distilbert.candidates(text, target_index, preliminary_top_k, max_variants)
 
-    def wordnet_candidates(self, text: str, target_index: int, max_variants: int, use_ppdb: bool = True) -> list[str]:
+    def wordnet_candidates(
+        self,
+        text: str,
+        target_index: int,
+        max_variants: int,
+        use_ppdb: bool = True,
+        target_lemma: str | None = None,
+        target_pos: str | None = None,
+    ) -> list[str]:
         tokens = tokenize_component(text)
         target = tokens[target_index] if 0 <= target_index < len(tokens) else ""
-        lemma, pos = self._target_features(text, target)
+        lemma, pos = (target_lemma, target_pos) if target_lemma or target_pos else self._target_features(text, target)
         return self.wordnet.candidates(
             text,
             target_index,
@@ -161,6 +170,86 @@ class TurbulenceService:
             target_lemma=lemma,
             target_pos=pos,
         )
+
+    def modifiable_units(self, text: str, preferred_pos: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+        units = self._all_modifiable_units(text)
+        preferred = {pos.upper() for pos in preferred_pos}
+        if preferred:
+            preferred_units = [unit for unit in units if unit["pos"] in preferred]
+            if preferred_units:
+                return preferred_units
+        return units
+
+    def _all_modifiable_units(self, text: str) -> list[dict[str, Any]]:
+        doc = self.nlp(text)
+        tokens = tokenize_component(text)
+        token_spans = [
+            (idx, match.group(0), match.start(), match.end())
+            for idx, match in enumerate(TOKEN_RE.finditer(text))
+        ]
+        used_indices: set[int] = set()
+        units: list[dict[str, Any]] = []
+        for token in doc:
+            if not self._is_modifiable_token(token):
+                continue
+            target_index = self._target_index_for_token(token, token_spans, used_indices)
+            if target_index is None:
+                continue
+            used_indices.add(target_index)
+            pos = str(getattr(token, "pos_", "")).upper()
+            start = int(getattr(token, "idx", token_spans[target_index][2]))
+            token_text = str(getattr(token, "text", ""))
+            units.append(
+                {
+                    "text": token_text,
+                    "lemma": str(getattr(token, "lemma_", token_text)),
+                    "pos": pos,
+                    "span": [start, start + len(token_text)],
+                    "leftTokens": len(units),
+                    "rightTokens": 0,
+                    "target_index": target_index,
+                    "tokens": tokens,
+                }
+            )
+        total_units = len(units)
+        for idx, unit in enumerate(units):
+            unit["leftTokens"] = idx
+            unit["rightTokens"] = total_units - idx - 1
+        return units
+
+    def _is_modifiable_token(self, token: Any) -> bool:
+        if bool(getattr(token, "is_punct", False)):
+            return False
+        if bool(getattr(token, "is_space", False)):
+            return False
+        if bool(getattr(token, "is_stop", False)):
+            return False
+        if bool(getattr(token, "like_num", False)):
+            return False
+        if str(getattr(token, "pos_", "")).upper() not in ALLOWED_TURBULENCE_POS:
+            return False
+        return bool(canonical_text(str(getattr(token, "text", ""))))
+
+    def _target_index_for_token(
+        self,
+        token: Any,
+        token_spans: list[tuple[int, str, int, int]],
+        used_indices: set[int],
+    ) -> int | None:
+        token_text = canonical_text(str(getattr(token, "text", "")))
+        token_start = int(getattr(token, "idx", -1))
+        token_end = token_start + len(str(getattr(token, "text", "")))
+        for idx, text, start, end in token_spans:
+            if idx in used_indices:
+                continue
+            if canonical_text(text) != token_text:
+                continue
+            if token_start < 0 or (start < token_end and token_start < end):
+                return idx
+        for idx, text, _start, _end in token_spans:
+            if idx not in used_indices and canonical_text(text) == token_text:
+                return idx
+        return None
 
     def _target_features(self, text: str, target: str) -> tuple[str | None, str | None]:
         if not target:
