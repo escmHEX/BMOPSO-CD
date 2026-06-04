@@ -30,9 +30,14 @@ def make_solution(f1: float, f2: float, idx: int) -> Solution:
 class StubEmbeddingService:
     def __init__(self, vectors: dict[str, list[float]]):
         self.vectors = vectors
+        self.cache = StubEmbeddingCache()
 
     def encode(self, texts: list[str], text_type: str) -> np.ndarray:
         return np.asarray([self.vectors[text] for text in texts], dtype=float)
+
+
+class StubEmbeddingCache:
+    size = 0
 
 
 class PassthroughRouter:
@@ -254,6 +259,27 @@ def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp
     assert params["targetWordRightTokens"] == 1
     assert params["maxVariants"] == 7
     assert params["target_index"] == 1
+
+
+def test_mopso_text_generation_uses_central_anchors_and_checkpoint_persists_them(test_config, tmp_path):
+    executor = StubExecutor()
+    central_anchors = ["bridge", "flooded roads", "request support", "urgent"]
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+        central_anchors,
+    )
+
+    engine._generate_text("prompt text")
+    payload = engine._checkpoint_payload(1, [], [], [])
+
+    assert executor.executed_task.task_params["centralAnchors"] == central_anchors
+    assert executor.executed_task.task_params["central_anchors"] == central_anchors
+    assert payload["central_anchors"] == central_anchors
 
 
 def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_config, tmp_path):

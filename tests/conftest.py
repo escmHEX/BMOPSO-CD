@@ -20,6 +20,7 @@ def test_config() -> RuntimeConfig:
     config.set("logging.console", False)
     for task in [
         "semantic_anchor_extraction",
+        "central_anchor_selection",
         "semantic_pool_generation",
         "semantic_pool_expansion",
         "semantic_component_influence_candidates",

@@ -55,20 +55,54 @@ class ExperimentRunner:
                 pbest_state = [solution_from_dict(item) for item in checkpoint_payload["pbest"]]
                 archive_state = [solution_from_dict(item) for item in checkpoint_payload["archive"]]
                 component_memory = dict(checkpoint_payload.get("component_memory", {}))
+                central_anchors = [
+                    str(item).strip()
+                    for item in checkpoint_payload.get("central_anchors", [])
+                    if str(item).strip()
+                ]
+                if not central_anchors:
+                    context_builder = InitialPopulationBuilder(config, router, executor, rng)
+                    reference_context = context_builder.build_reference_context(self.reference_text)
+                    central_anchors = reference_context.central_anchors
+                    write_json(
+                        outdir / "reference_context.json",
+                        {
+                            "semantic_anchors": reference_context.semantic_anchors,
+                            "central_anchors": central_anchors,
+                        },
+                    )
                 start_generation = int(checkpoint_payload["generation"])
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
                 progress.stage(3, 6, "Construyendo poblacion inicial")
                 initial_builder = InitialPopulationBuilder(config, router, executor, rng)
-                initial_population = initial_builder.build(self.reference_text)
+                initial_result = initial_builder.build_with_context(self.reference_text)
+                initial_population = initial_result.population
+                central_anchors = initial_result.central_anchors
                 pbest_state = None
                 archive_state = None
                 component_memory = None
                 start_generation = 0
+                write_json(
+                    outdir / "reference_context.json",
+                    {
+                        "semantic_anchors": initial_result.semantic_anchors,
+                        "central_anchors": central_anchors,
+                    },
+                )
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
-            engine = BinaryMOPSOCDEngine(config, router, executor, rng, outdir, self.reference_text, progress)
+            engine = BinaryMOPSOCDEngine(
+                config,
+                router,
+                executor,
+                rng,
+                outdir,
+                self.reference_text,
+                central_anchors,
+                progress,
+            )
             progress.stage(4, 6, "Ejecutando MOPSO-CD")
             population, archive = engine.run(
                 initial_population,

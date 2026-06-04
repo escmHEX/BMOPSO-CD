@@ -56,12 +56,14 @@ logging:
 router:
   task_models:
     semantic_anchor_extraction: "llama3.1:8b"
+    central_anchor_selection: "llama3.1:8b"
     semantic_pool_generation: "llama3.1:8b"
     semantic_pool_expansion: "llama3.1:8b"
     semantic_component_influence_candidates: "llama3.1:8b"
     synthetic_text_generation: "llama3.1:8b"
   heuristics:
     semantic_anchor_extraction: true
+    central_anchor_selection: true
     semantic_pool_generation: true
     semantic_pool_expansion: true
     semantic_component_influence_candidates: true

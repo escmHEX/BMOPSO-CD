@@ -7,6 +7,7 @@ from typing import Any
 from binary_mopso_cd.component_specs import component_spec
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
+    TASK_CENTRAL_ANCHOR_SELECTION,
     TASK_INFLUENCE,
     TASK_POOL_EXPANSION,
     TASK_POOL_GENERATION,
@@ -63,12 +64,32 @@ Rules:
 - Keep each item short.
 - Do not include explanations, markdown, numbering, or extra keys."""
 
+SYSTEM_CENTRAL_ANCHOR_SELECTION = """You select central anchors for a synthetic text generation algorithm.
+
+Task:
+Select a compact set of central anchors from the reference text and the provided semantic anchors.
+
+Output format:
+Return only valid JSON with exactly this structure:
+{"central_anchors": ["...", "..."]}
+
+Rules:
+- Select only anchors that preserve the main meaning of the reference text.
+- Prefer specific phrases over generic words.
+- Prefer phrases that are present in the reference text or directly supported by it.
+- Avoid generic domain terms unless they are essential.
+- Avoid redundant anchors.
+- Do not invent entities, events, resources, or topics.
+- Return between 3 and 5 anchors.
+- Do not include explanations, markdown, numbering, or extra keys."""
+
 SYSTEM_TEXT_GENERATION = """You are a plain-text generator for social media messages related to crises and emergencies.
+
 You will receive one text-generation instruction from the user.
 Follow the instruction and generate exactly one final text message.
+
 Output rules:
 - Return plain text only.
-- Return the dataset content itself, not a prompt, explanation, title, label, list, code, or metadata.
 - Do not describe the task.
 - Do not add unsolicited safety advice.
 - Do not use quotation marks, hashtags, URLs, usernames, placeholders, tags, or special markers.
@@ -121,6 +142,15 @@ POOL_ITEMS_SCHEMA = {
         "items": JSON_ARRAY_OF_STRINGS_SCHEMA,
     },
     "required": ["items"],
+    "additionalProperties": False,
+}
+
+CENTRAL_ANCHOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "central_anchors": JSON_ARRAY_OF_STRINGS_SCHEMA,
+    },
+    "required": ["central_anchors"],
     "additionalProperties": False,
 }
 
@@ -196,6 +226,12 @@ def _format_other_components(value: Any) -> str:
     return text or "{}"
 
 
+def _format_central_anchors(value: Any) -> str:
+    if isinstance(value, list):
+        return "\n".join(str(item).strip() for item in value if str(item).strip())
+    return str(value or "").strip()
+
+
 def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str]:
     if semantic_task == TASK_ANCHORS:
         return (
@@ -205,6 +241,33 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
                 f'"""{params["reference_text"]}"""\n\n'
                 "General domain:\n"
                 f"{_general_domain(params)}."
+            ),
+        )
+    if semantic_task == TASK_CENTRAL_ANCHOR_SELECTION:
+        reference_text = str(_first_param(params, "referenceText", "reference_text")).strip()
+        semantic_anchors = _first_param(params, "semanticAnchors", "semantic_anchors", "anchors", default={})
+        central_anchor_count = int(_first_param(params, "numCentralAnchors", "num_central_anchors", default=4))
+        return (
+            SYSTEM_CENTRAL_ANCHOR_SELECTION,
+            (
+                "Reference text:\n"
+                f'"""{reference_text}"""\n\n'
+                "Semantic anchors:\n"
+                f"{_json_block(semantic_anchors)}\n\n"
+                "Number of central anchors to return:\n"
+                f"{central_anchor_count}\n\n"
+                "Coverage priority:\n"
+                "Select anchors that cover distinct semantic roles when available:\n"
+                "- main entity or stakeholder\n"
+                "- main event or problem\n"
+                "- main resource, topic, or information type\n"
+                "- main action, channel, or information source\n\n"
+                "Selection rules:\n"
+                "- Prefer specific compound noun phrases over isolated generic words.\n"
+                "- Convert action anchors into concise noun phrases when possible.\n"
+                "- Do not select generic domain terms such as \"crisis\" or \"emergency\" when more specific anchors are available.\n"
+                "- Avoid redundant anchors unless the repeated concept is needed to preserve a distinct semantic role.\n\n"
+                "Select the central anchors that should be reused as semantic context during final text generation."
             ),
         )
     if semantic_task == TASK_POOL_GENERATION:
@@ -298,7 +361,20 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             ),
         )
     if semantic_task == TASK_SYNTHETIC_TEXT:
-        return SYSTEM_TEXT_GENERATION, str(params["prompt"])
+        central_anchors = _first_param(params, "centralAnchors", "central_anchors", default=[])
+        return (
+            SYSTEM_TEXT_GENERATION,
+            (
+                "Prompt to follow:\n"
+                f'"""{params["prompt"]}"""\n\n'
+                "Reference-specific anchors:\n"
+                f"{_format_central_anchors(central_anchors)}\n\n"
+                "Instruction:\n"
+                "Follow the prompt as the main generation instruction. Use the reference-specific anchors only as "
+                "semantic context to preserve important information when compatible with the prompt. Do not force "
+                "all anchors into the message. Do not copy the full reference text."
+            ),
+        )
     raise ValueError(f"No prompt template for semantic task: {semantic_task}")
 
 
@@ -307,6 +383,8 @@ def response_format_for_task(semantic_task: str) -> Any:
         return None
     if semantic_task == TASK_ANCHORS:
         return ANCHOR_SCHEMA
+    if semantic_task == TASK_CENTRAL_ANCHOR_SELECTION:
+        return CENTRAL_ANCHOR_SCHEMA
     if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
         return POOL_ITEMS_SCHEMA
     if semantic_task == TASK_INFLUENCE:
@@ -359,6 +437,23 @@ def parse_task_result(semantic_task: str, raw: str) -> Any:
                     seen.add(normalized)
                     items.append(text)
             anchors[key] = items
+        return anchors
+    if semantic_task == TASK_CENTRAL_ANCHOR_SELECTION:
+        if not isinstance(payload, dict):
+            raise ValueError("Central anchor selection must return a JSON object")
+        value = payload.get("central_anchors")
+        if not isinstance(value, list):
+            raise ValueError("central_anchor_selection must return a central_anchors array")
+        seen: set[str] = set()
+        anchors: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            normalized = canonical_text(text)
+            if text and normalized not in seen:
+                seen.add(normalized)
+                anchors.append(text)
+        if len(anchors) < 3 or len(anchors) > 5:
+            raise ValueError("central_anchor_selection must return between 3 and 5 central anchors")
         return anchors
     if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
         if isinstance(payload, dict):

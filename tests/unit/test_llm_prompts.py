@@ -9,6 +9,7 @@ from binary_mopso_cd.llm_prompts import (
     response_format_for_task,
 )
 from binary_mopso_cd.router import TASK_ANCHORS, TASK_INFLUENCE, TASK_POOL_EXPANSION, TASK_POOL_GENERATION
+from binary_mopso_cd.router import TASK_CENTRAL_ANCHOR_SELECTION, TASK_SYNTHETIC_TEXT
 
 
 DOMAIN = "social media messages related to crises and emergencies"
@@ -69,6 +70,132 @@ def test_pool_generation_messages_include_component_instruction():
     assert "Required number of items:\n2" in user
     assert '"entities": [\n    "bridge"\n  ]' in user
     assert user.endswith("Additional instruction:\nReturn message-sender roles.")
+
+
+def test_central_anchor_selection_messages_match_strategy():
+    anchors = {
+        "entities": ["small businesses", "local emergency center"],
+        "topics": ["disaster financing options"],
+        "actions": ["share verified updates"],
+        "constraints": ["avoid rumors"],
+    }
+
+    system, user = build_messages(
+        TASK_CENTRAL_ANCHOR_SELECTION,
+        {
+            "referenceText": "Small businesses can check the local emergency center for disaster financing options.",
+            "semanticAnchors": anchors,
+            "numCentralAnchors": 4,
+        },
+    )
+
+    assert system == """You select central anchors for a synthetic text generation algorithm.
+
+Task:
+Select a compact set of central anchors from the reference text and the provided semantic anchors.
+
+Output format:
+Return only valid JSON with exactly this structure:
+{"central_anchors": ["...", "..."]}
+
+Rules:
+- Select only anchors that preserve the main meaning of the reference text.
+- Prefer specific phrases over generic words.
+- Prefer phrases that are present in the reference text or directly supported by it.
+- Avoid generic domain terms unless they are essential.
+- Avoid redundant anchors.
+- Do not invent entities, events, resources, or topics.
+- Return between 3 and 5 anchors.
+- Do not include explanations, markdown, numbering, or extra keys."""
+    assert user == (
+        "Reference text:\n"
+        '"""Small businesses can check the local emergency center for disaster financing options."""\n\n'
+        "Semantic anchors:\n"
+        "{\n"
+        '  "entities": [\n'
+        '    "small businesses",\n'
+        '    "local emergency center"\n'
+        "  ],\n"
+        '  "topics": [\n'
+        '    "disaster financing options"\n'
+        "  ],\n"
+        '  "actions": [\n'
+        '    "share verified updates"\n'
+        "  ],\n"
+        '  "constraints": [\n'
+        '    "avoid rumors"\n'
+        "  ]\n"
+        "}\n\n"
+        "Number of central anchors to return:\n"
+        "4\n\n"
+        "Coverage priority:\n"
+        "Select anchors that cover distinct semantic roles when available:\n"
+        "- main entity or stakeholder\n"
+        "- main event or problem\n"
+        "- main resource, topic, or information type\n"
+        "- main action, channel, or information source\n\n"
+        "Selection rules:\n"
+        "- Prefer specific compound noun phrases over isolated generic words.\n"
+        "- Convert action anchors into concise noun phrases when possible.\n"
+        '- Do not select generic domain terms such as "crisis" or "emergency" when more specific anchors are available.\n'
+        "- Avoid redundant anchors unless the repeated concept is needed to preserve a distinct semantic role.\n\n"
+        "Select the central anchors that should be reused as semantic context during final text generation."
+    )
+
+
+def test_central_anchor_schema_and_parser():
+    schema = response_format_for_task(TASK_CENTRAL_ANCHOR_SELECTION)
+
+    assert schema["type"] == "object"
+    assert schema["required"] == ["central_anchors"]
+    assert parse_task_result(
+        TASK_CENTRAL_ANCHOR_SELECTION,
+        '{"central_anchors": ["small businesses", " disaster financing options ", "local emergency center"]}',
+    ) == ["small businesses", "disaster financing options", "local emergency center"]
+    with pytest.raises(ValueError, match="between 3 and 5"):
+        parse_task_result(TASK_CENTRAL_ANCHOR_SELECTION, '{"central_anchors": ["one", "two"]}')
+
+
+def test_synthetic_text_messages_use_central_anchors():
+    system, user = build_messages(
+        TASK_SYNTHETIC_TEXT,
+        {
+            "prompt": "Generate a short social media message.",
+            "centralAnchors": [
+                "small businesses",
+                "disaster financing options",
+                "local emergency center",
+                "verified updates",
+            ],
+        },
+    )
+
+    assert system == """You are a plain-text generator for social media messages related to crises and emergencies.
+
+You will receive one text-generation instruction from the user.
+Follow the instruction and generate exactly one final text message.
+
+Output rules:
+- Return plain text only.
+- Do not describe the task.
+- Do not add unsolicited safety advice.
+- Do not use quotation marks, hashtags, URLs, usernames, placeholders, tags, or special markers.
+- Limit the message to between 1 and 4 sentences.
+- Return only the final message."""
+    assert user == (
+        "Prompt to follow:\n"
+        '"""Generate a short social media message."""\n\n'
+        "Reference-specific anchors:\n"
+        "small businesses\n"
+        "disaster financing options\n"
+        "local emergency center\n"
+        "verified updates\n\n"
+        "Instruction:\n"
+        "Follow the prompt as the main generation instruction. Use the reference-specific anchors only as semantic "
+        "context to preserve important information when compatible with the prompt. Do not force all anchors into the "
+        "message. Do not copy the full reference text."
+    )
+    assert response_format_for_task(TASK_SYNTHETIC_TEXT) is None
 
 
 def test_pool_expansion_messages_include_existing_items():

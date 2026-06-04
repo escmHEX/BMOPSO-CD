@@ -46,6 +46,7 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
         config.set("ollama.default_model", args.model)
         for task in [
             "semantic_anchor_extraction",
+            "central_anchor_selection",
             "semantic_pool_generation",
             "semantic_pool_expansion",
             "semantic_component_influence_candidates",

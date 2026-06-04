@@ -169,6 +169,7 @@ class BinaryMOPSOCDEngine:
         rng: Random,
         outdir: Path,
         reference_text: str,
+        central_anchors: list[str] | None = None,
         progress_logger: Any | None = None,
     ):
         self.config = config
@@ -177,6 +178,7 @@ class BinaryMOPSOCDEngine:
         self.rng = rng
         self.outdir = outdir
         self.reference_text = reference_text
+        self.central_anchors = list(central_anchors or [])
         self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
@@ -563,7 +565,12 @@ class BinaryMOPSOCDEngine:
             uuid4().hex,
             "optimization",
             TASK_SYNTHETIC_TEXT,
-            {"prompt": prompt, "reference_text": self.reference_text},
+            {
+                "prompt": prompt,
+                "reference_text": self.reference_text,
+                "centralAnchors": self.central_anchors,
+                "central_anchors": self.central_anchors,
+            },
         )
         return str(self.executor.execute(self.router.route(route))).strip()
 
@@ -636,6 +643,7 @@ class BinaryMOPSOCDEngine:
             "embedding_cache_file": str(self.config.get("runtime.embedding_cache_file", "embedding_cache.json")),
             "embedding_cache_size": self.executor.embedding_service.cache.size,
             "llm_log_file": "llm_calls.jsonl",
+            "central_anchors": list(self.central_anchors),
         }
 
 

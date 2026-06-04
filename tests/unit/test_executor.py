@@ -20,6 +20,7 @@ def test_executor_ollama_contract_is_single_shot_stream_false(test_config, tmp_p
                 "The generated message must follow the role, address the topic, and satisfy the action."
             ),
             "reference_text": "Evacuation order",
+            "centralAnchors": ["evacuation order", "local officials", "resident warning", "safe routes"],
         },
     )
     result = executor.execute(router.route(task))

@@ -5,6 +5,7 @@ from binary_mopso_cd.router import (
     ALG_LLM,
     ALG_WORDNET_PPDB,
     TASK_ANCHORS,
+    TASK_CENTRAL_ANCHOR_SELECTION,
     TASK_WORD_REPLACEMENT,
     RouteTask,
     SemanticRouter,
@@ -17,6 +18,21 @@ def test_router_anchor_heuristic_short_reference(test_config):
     execution = router.route(task)
     assert execution.alg_name == ALG_LLM
     assert execution.alg_params["temperature"] == 0.25
+    assert execution.alg_params["top_p"] == 0.90
+
+
+def test_router_routes_central_anchor_selection_with_default_llm_params(test_config):
+    router = SemanticRouter(test_config)
+    task = RouteTask(
+        "1",
+        "test",
+        TASK_CENTRAL_ANCHOR_SELECTION,
+        {"referenceText": "Flood warning now", "semanticAnchors": {}, "numCentralAnchors": 4},
+    )
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["temperature"] == 0.60
     assert execution.alg_params["top_p"] == 0.90
 
 

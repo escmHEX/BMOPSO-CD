@@ -8,6 +8,7 @@ from binary_mopso_cd.utils import progress_ratio, word_count
 
 
 TASK_ANCHORS = "semantic_anchor_extraction"
+TASK_CENTRAL_ANCHOR_SELECTION = "central_anchor_selection"
 TASK_POOL_GENERATION = "semantic_pool_generation"
 TASK_POOL_EXPANSION = "semantic_pool_expansion"
 TASK_INFLUENCE = "semantic_component_influence_candidates"
@@ -72,6 +73,7 @@ class SemanticRouter:
             return self._route_word_replacement(task)
         if semantic_task in {
             TASK_ANCHORS,
+            TASK_CENTRAL_ANCHOR_SELECTION,
             TASK_POOL_GENERATION,
             TASK_POOL_EXPANSION,
             TASK_INFLUENCE,
@@ -95,6 +97,13 @@ class SemanticRouter:
             base = self.config.get("router.llm_params.semantic_anchor_extraction")
             bucket = "short" if word_count(reference) <= int(base["short_word_threshold"]) else "long"
             return dict(base[bucket])
+        if task.semantic_task == TASK_CENTRAL_ANCHOR_SELECTION:
+            return dict(
+                self.config.get(
+                    "router.llm_params.central_anchor_selection",
+                    self.config.get("router.llm_params.disabled_default"),
+                )
+            )
         if task.semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
             component = str(task.task_params.get("component", "topic")).lower()
             reference = str(task.task_params.get("reference_text", ""))
