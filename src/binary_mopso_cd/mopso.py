@@ -34,6 +34,7 @@ from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, w
 
 
 SolutionSignature = tuple[tuple[str, str], ...]
+GUIDED_MOVES = {"cognitive", "social"}
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -315,12 +316,15 @@ class BinaryMOPSOCDEngine:
         if len(candidates) > max_changes:
             candidates = weighted_sample_without_replacement(candidates, max_changes, self.rng)
         for component, mode, _weight in candidates:
-            replacement = self._candidate_for_mode(component, mode, updated, pbest, leader, generation)
+            effective_mode = self._effective_candidate_mode(component, mode, updated)
+            if effective_mode is None:
+                continue
+            replacement = self._candidate_for_mode(component, effective_mode, updated, pbest, leader, generation)
             if replacement:
                 updated.vector.components[component] = replacement
                 updated.changed = True
-                if mode in {"cognitive", "social"}:
-                    updated.last_guided_move[component] = replacement
+                if effective_mode in GUIDED_MOVES:
+                    updated.last_guided_move[component] = effective_mode
         for component in self.components.frozen:
             updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
             updated.velocity[component] = particle.velocity.get(component, 0.0)
@@ -366,7 +370,7 @@ class BinaryMOPSOCDEngine:
         particle: Solution,
     ) -> str | None:
         weights = {
-            "inertia": inertia_weight if component in particle.last_guided_move else 0.0,
+            "inertia": inertia_weight if self._last_guided_move(component, particle) is not None else 0.0,
             "cognitive": cognitive_weight,
             "social": social_weight,
         }
@@ -391,12 +395,12 @@ class BinaryMOPSOCDEngine:
         generation: int,
     ) -> str | None:
         current = particle.vector.components[component]
-        if mode == "inertia":
-            candidate = particle.last_guided_move.get(component)
-            return self._select_inertia_candidate(component, current, [candidate] if candidate else [])
-        if mode == "turbulence":
+        effective_mode = self._effective_candidate_mode(component, mode, particle)
+        if effective_mode is None:
+            return None
+        if effective_mode == "turbulence":
             return self._turbulence_candidate(component, current)
-        target = pbest.vector.components[component] if mode == "cognitive" else leader.vector.components[component]
+        target = pbest.vector.components[component] if effective_mode == "cognitive" else leader.vector.components[component]
         route = RouteTask(
             uuid4().hex,
             "optimization",
@@ -405,6 +409,17 @@ class BinaryMOPSOCDEngine:
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
         return self._select_guided_candidate(component, current, target, raw_candidates)
+
+    def _effective_candidate_mode(self, component: str, mode: str, particle: Solution) -> str | None:
+        if mode == "inertia":
+            return self._last_guided_move(component, particle)
+        if mode == "turbulence" or mode in GUIDED_MOVES:
+            return mode
+        return None
+
+    def _last_guided_move(self, component: str, particle: Solution) -> str | None:
+        movement = str(particle.last_guided_move.get(component, "")).strip().lower()
+        return movement if movement in GUIDED_MOVES else None
 
     def _influence_task_params(
         self,
@@ -469,17 +484,6 @@ class BinaryMOPSOCDEngine:
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
         return self._select_turbulence_candidate(component, current, raw_candidates)
-
-    def _select_inertia_candidate(self, component: str, current: str, raw_candidates: list[str]) -> str | None:
-        candidates = self._basic_candidates(component, current, raw_candidates, forbidden=None)
-        if not candidates:
-            return None
-        candidate_embeddings = self.executor.embedding_service.encode(candidates, text_type="component")
-        duplicate_sims = self.component_memory.max_similarity(component, candidate_embeddings)
-        valid_indices = np.where(duplicate_sims < self.mopso.tau_dup)[0]
-        if valid_indices.size == 0:
-            return None
-        return candidates[int(valid_indices[0])]
 
     def _select_guided_candidate(
         self,
