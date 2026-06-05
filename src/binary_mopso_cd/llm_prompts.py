@@ -232,6 +232,25 @@ def _format_central_anchors(value: Any) -> str:
     return str(value or "").strip()
 
 
+def build_base_text_generation_user_prompt(prompt: str) -> str:
+    return (
+        "Prompt to follow:\n"
+        f'"""{prompt}"""'
+    )
+
+
+def build_anchored_text_generation_user_prompt(prompt: str, central_anchors: list[str]) -> str:
+    return (
+        f"{build_base_text_generation_user_prompt(prompt)}\n\n"
+        "Reference-specific anchors:\n"
+        f"{_format_central_anchors(central_anchors)}\n\n"
+        "Instruction:\n"
+        "Follow the prompt as the main generation instruction. Use the reference-specific anchors only as "
+        "semantic context to preserve important information when compatible with the prompt. Do not force "
+        "all anchors into the message. Do not copy the full reference text."
+    )
+
+
 def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str]:
     if semantic_task == TASK_ANCHORS:
         return (
@@ -361,19 +380,13 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
             ),
         )
     if semantic_task == TASK_SYNTHETIC_TEXT:
-        central_anchors = _first_param(params, "centralAnchors", "central_anchors", default=[])
+        system_prompt = str(
+            _first_param(params, "systemPromptOverride", "system_prompt_override", default=SYSTEM_TEXT_GENERATION)
+        )
+        user_prompt = _first_param(params, "userPromptOverride", "user_prompt_override", default=None)
         return (
-            SYSTEM_TEXT_GENERATION,
-            (
-                "Prompt to follow:\n"
-                f'"""{params["prompt"]}"""\n\n'
-                "Reference-specific anchors:\n"
-                f"{_format_central_anchors(central_anchors)}\n\n"
-                "Instruction:\n"
-                "Follow the prompt as the main generation instruction. Use the reference-specific anchors only as "
-                "semantic context to preserve important information when compatible with the prompt. Do not force "
-                "all anchors into the message. Do not copy the full reference text."
-            ),
+            system_prompt,
+            str(user_prompt) if user_prompt is not None else build_base_text_generation_user_prompt(str(params["prompt"])),
         )
     raise ValueError(f"No prompt template for semantic task: {semantic_task}")
 

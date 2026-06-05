@@ -15,6 +15,7 @@ from binary_mopso_cd.mopso import (
     evaluate_unique_solutions_by_signature,
     utility,
 )
+from binary_mopso_cd.router import TASK_SYNTHETIC_TEXT
 from binary_mopso_cd.settings import ComponentSettings
 
 
@@ -73,6 +74,8 @@ class StubExecutor:
 
     def execute(self, task):
         self.executed_task = task
+        if task.semantic_task == TASK_SYNTHETIC_TEXT:
+            return "public emergency alert"
         return ["public emergency alert"]
 
 
@@ -92,9 +95,13 @@ class GuidedMoveExecutor:
         self.turbulence_provider = StubTurbulenceProvider()
         self.candidates = list(candidates or [])
         self.executed_task = None
+        self.tasks = []
 
     def execute(self, task):
         self.executed_task = task
+        self.tasks.append(task)
+        if task.semantic_task == TASK_SYNTHETIC_TEXT:
+            return "valid generated text"
         return list(self.candidates)
 
 
@@ -261,9 +268,53 @@ def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp
     assert params["target_index"] == 1
 
 
-def test_mopso_text_generation_uses_central_anchors_and_checkpoint_persists_them(test_config, tmp_path):
+def test_mopso_text_generation_uses_base_prompt_and_checkpoint_persists_anchors(test_config, tmp_path):
     executor = StubExecutor()
     central_anchors = ["bridge", "flooded roads", "request support", "urgent"]
+    semantic_anchors = {"entities": ["bridge"], "topics": ["flooded roads"]}
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+        central_anchors,
+        semantic_anchors=semantic_anchors,
+    )
+
+    engine._generate_text("prompt text")
+    payload = engine._checkpoint_payload(1, [], [], [])
+
+    assert "centralAnchors" not in executor.executed_task.task_params
+    assert "userPromptOverride" not in executor.executed_task.task_params
+    assert payload["central_anchors"] == central_anchors
+    assert payload["semantic_anchors"] == semantic_anchors
+
+
+def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_config, tmp_path):
+    test_config.set("experiment.iterations", 3)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+        ["bridge", "flooded roads", "request support"],
+    )
+
+    assert engine._anchor_inclusion_probability(1) == pytest.approx(0.05)
+    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.70)
+
+
+def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_config, tmp_path):
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.p_anchor_min", 1.0)
+    test_config.set("mopso.p_anchor_max", 1.0)
+    executor = GuidedMoveExecutor()
+    central_anchors = ["bridge", "flooded roads", "request support"]
     engine = BinaryMOPSOCDEngine(
         test_config,
         PassthroughRouter(),
@@ -273,13 +324,102 @@ def test_mopso_text_generation_uses_central_anchors_and_checkpoint_persists_them
         "reference",
         central_anchors,
     )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._candidate_for_mode = lambda _component, mode, *_args: "updated topic" if mode == "cognitive" else None
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
 
-    engine._generate_text("prompt text")
-    payload = engine._checkpoint_payload(1, [], [], [])
+    updated = engine._update_particle(particle, pbest, leader, generation=1)
 
-    assert executor.executed_task.task_params["centralAnchors"] == central_anchors
-    assert executor.executed_task.task_params["central_anchors"] == central_anchors
-    assert payload["central_anchors"] == central_anchors
+    synthetic_task = [task for task in executor.tasks if task.semantic_task == TASK_SYNTHETIC_TEXT][0]
+    assert "userPromptOverride" in synthetic_task.task_params
+    assert "Reference-specific anchors:" in synthetic_task.task_params["userPromptOverride"]
+    assert "Instruction:" in synthetic_task.task_params["userPromptOverride"]
+    assert "centralAnchors" not in synthetic_task.task_params
+    assert updated.metadata["used_central_anchors"] is True
+    assert updated.metadata["anchor_inclusion_probability"] == pytest.approx(1.0)
+
+
+def test_mopso_update_uses_base_prompt_when_anchor_event_does_not_occur(test_config, tmp_path):
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.p_anchor_min", 0.0)
+    test_config.set("mopso.p_anchor_max", 0.0)
+    executor = GuidedMoveExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+        ["bridge", "flooded roads", "request support"],
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._candidate_for_mode = lambda _component, mode, *_args: "updated topic" if mode == "cognitive" else None
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
+
+    updated = engine._update_particle(particle, pbest, leader, generation=1)
+
+    synthetic_task = [task for task in executor.tasks if task.semantic_task == TASK_SYNTHETIC_TEXT][0]
+    assert "userPromptOverride" not in synthetic_task.task_params
+    assert updated.metadata["used_central_anchors"] is False
+    assert updated.metadata["anchor_inclusion_probability"] == pytest.approx(0.0)
+
+
+def test_mopso_unchanged_particle_does_not_generate_text_or_evaluate_anchor_probability(test_config, tmp_path):
+    executor = GuidedMoveExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+        ["bridge", "flooded roads", "request support"],
+    )
+    engine.components = topic_only_components()
+    engine._candidate_for_mode = lambda *_args: None
+    engine._anchor_inclusion_probability = lambda _generation: (_ for _ in ()).throw(AssertionError("not expected"))
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "prompt",
+        "text",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 0.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+
+    updated = engine._update_particle(particle, particle.clone(), particle.clone(), generation=1)
+
+    assert not updated.changed
+    assert all(task.semantic_task != TASK_SYNTHETIC_TEXT for task in executor.tasks)
 
 
 def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_config, tmp_path):
@@ -298,7 +438,7 @@ def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_confi
     engine._guided_mode = lambda *_args: "cognitive"
     engine._candidate_for_mode = lambda _component, mode, *_args: "updated topic" if mode == "cognitive" else None
     engine._render_prompt = lambda _vector: "new prompt"
-    engine._generate_text = lambda _prompt: "valid generated text"
+    engine._generate_text = lambda _prompt, **_kwargs: "valid generated text"
     engine._generated_text_fidelity = lambda _text: 1.0
     particle = Solution(
         SemanticVector({"topic": "current topic"}),

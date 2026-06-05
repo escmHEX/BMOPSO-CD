@@ -113,36 +113,49 @@ def test_build_pool_passes_strategy_component_context(test_config):
     assert "Return communicative intents" in params["component_additional_instruction"]
 
 
-def test_reference_context_selects_central_anchors_once_after_extraction(test_config):
+def test_reference_context_extracts_semantic_anchors_without_central_selection(test_config):
     executor = RecordingExecutor()
     builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
 
     context = builder.build_reference_context("Flooded roads near the bridge need urgent support.")
 
+    assert [task.semantic_task for task in executor.tasks] == [TASK_ANCHORS]
+    assert context.semantic_anchors["entities"] == ["bridge"]
+
+
+def test_select_central_anchors_uses_reference_context(test_config):
+    executor = RecordingExecutor()
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+    context = builder.build_reference_context("Flooded roads near the bridge need urgent support.")
+    central_anchors = builder.select_central_anchors(
+        "Flooded roads near the bridge need urgent support.",
+        context.semantic_anchors,
+    )
+
     assert [task.semantic_task for task in executor.tasks] == [
         TASK_ANCHORS,
         TASK_CENTRAL_ANCHOR_SELECTION,
     ]
-    assert context.semantic_anchors["entities"] == ["bridge"]
-    assert context.central_anchors == ["bridge", "flooded roads", "request support", "urgent"]
+    assert central_anchors == ["bridge", "flooded roads", "request support", "urgent"]
     params = executor.tasks[1].task_params
     assert params["referenceText"] == "Flooded roads near the bridge need urgent support."
     assert params["numCentralAnchors"] == 4
 
 
-def test_generate_texts_reuses_same_central_anchors(test_config):
+def test_generate_texts_uses_base_prompt_without_central_anchors(test_config):
     test_config.set("experiment.n", 2)
     executor = TextRecordingExecutor(["first generated text.", "second generated text."])
     builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
-    central_anchors = ["bridge", "flooded roads", "request support", "urgent"]
     items = [
         (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
         (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
     ]
 
-    generated = builder._generate_texts(items, "reference text", central_anchors)
+    generated = builder._generate_texts(items, "reference text")
 
     assert len(generated) == 2
     synthetic_tasks = [task for task in executor.tasks if task.semantic_task == TASK_SYNTHETIC_TEXT]
     assert len(synthetic_tasks) == 2
-    assert [task.task_params["centralAnchors"] for task in synthetic_tasks] == [central_anchors, central_anchors]
+    assert all("centralAnchors" not in task.task_params for task in synthetic_tasks)
+    assert all("userPromptOverride" not in task.task_params for task in synthetic_tasks)
+    assert all(solution.metadata["used_central_anchors"] is False for solution in generated)

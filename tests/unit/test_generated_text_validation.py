@@ -84,6 +84,8 @@ def test_initialization_rejects_low_fidelity_generated_text(test_config, tmp_pat
     assert generated[0].generated_text == "valid generated text."
     assert generated[0].objectives is not None
     assert generated[0].objectives.f1 == pytest.approx(1.0)
+    assert generated[0].metadata["used_central_anchors"] is False
+    assert generated[0].metadata["anchor_inclusion_probability"] is None
     rows = [
         json.loads(line)
         for line in (tmp_path / "initialization_rejections.jsonl").read_text(encoding="utf-8").splitlines()
@@ -104,6 +106,7 @@ def test_mopso_rejects_invalid_generated_text_and_preserves_velocity(test_config
         Objectives(0.5, 0.5),
         velocity={"role": 2.0, "topic": 2.0, "action": 2.0},
         initial_components={"role": "role", "topic": "topic", "action": "action"},
+        metadata={"used_central_anchors": False, "anchor_inclusion_probability": None},
         changed=False,
     )
     engine = BinaryMOPSOCDEngine(
@@ -113,10 +116,11 @@ def test_mopso_rejects_invalid_generated_text_and_preserves_velocity(test_config
         rng,
         tmp_path,
         "reference",
+        ["reference anchor", "second anchor", "third anchor"],
     )
     engine._candidate_for_mode = lambda component, *_args: f"{component} changed"
     engine._render_prompt = lambda _vector: "new prompt"
-    engine._generate_text = lambda _prompt: "not a feasible request"
+    engine._generate_text = lambda _prompt, **_kwargs: "not a feasible request"
 
     updated = engine._update_particle(particle, particle.clone(), particle.clone(), generation=1)
 
@@ -124,6 +128,7 @@ def test_mopso_rejects_invalid_generated_text_and_preserves_velocity(test_config
     assert updated.vector.components == particle.vector.components
     assert updated.prompt == particle.prompt
     assert updated.generated_text == particle.generated_text
+    assert updated.metadata == particle.metadata
     assert updated.velocity["role"] == pytest.approx(1.8)
     rows = [
         json.loads(line)
@@ -131,3 +136,5 @@ def test_mopso_rejects_invalid_generated_text_and_preserves_velocity(test_config
     ]
     assert rows[0]["phase"] == "optimization"
     assert rows[0]["reason"] == REASON_REFUSAL_PHRASE
+    assert rows[0]["used_central_anchors"] in {True, False}
+    assert rows[0]["anchor_inclusion_probability"] is not None

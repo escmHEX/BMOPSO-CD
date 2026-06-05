@@ -34,14 +34,12 @@ DEFAULT_NUM_CENTRAL_ANCHORS = 4
 @dataclass(frozen=True)
 class ReferenceContext:
     semantic_anchors: dict[str, list[str]]
-    central_anchors: list[str]
 
 
 @dataclass(frozen=True)
 class InitialPopulationResult:
     population: list[Solution]
     semantic_anchors: dict[str, list[str]]
-    central_anchors: list[str]
 
 
 class InitialPopulationBuilder:
@@ -62,7 +60,6 @@ class InitialPopulationBuilder:
         domain = str(self.config.get("experiment.domain"))
         reference_context = self.build_reference_context(reference_text)
         anchors = reference_context.semantic_anchors
-        central_anchors = reference_context.central_anchors
         central_anchor_count = count_anchors(anchors)
         pool_sizes = choose_pool_sizes(n, self.config)
         pools: dict[str, list[str]] = {}
@@ -84,7 +81,7 @@ class InitialPopulationBuilder:
             raise RuntimeError(f"Initial semantic pools are insufficient: product={product}, required={min_product}")
         candidates = self._candidate_vectors(pools)
         reduced = self._reduce_by_prompt_diversity(candidates, domain, 2 * n)
-        generated = self._generate_texts(reduced, reference_text, central_anchors)
+        generated = self._generate_texts(reduced, reference_text)
         generated.sort(
             key=lambda solution: (
                 solution.objectives.f1 if solution.objectives else -2.0,
@@ -99,25 +96,24 @@ class InitialPopulationBuilder:
             solution.velocity = {component: 0.0 for component in self.components.order}
             solution.last_guided_move = {}
             solution.changed = False
-        return InitialPopulationResult(selected, anchors, central_anchors)
+        return InitialPopulationResult(selected, anchors)
 
     def build_reference_context(self, reference_text: str) -> ReferenceContext:
         anchors = self._extract_anchors(reference_text)
-        central_anchors = self._select_central_anchors(reference_text, anchors)
-        return ReferenceContext(anchors, central_anchors)
+        return ReferenceContext(anchors)
 
     def _extract_anchors(self, reference_text: str) -> dict[str, list[str]]:
         route = RouteTask(uuid4().hex, "initialization", TASK_ANCHORS, {"reference_text": reference_text})
         return dict(self.executor.execute(self.router.route(route)))
 
-    def _select_central_anchors(
+    def select_central_anchors(
         self,
         reference_text: str,
         semantic_anchors: dict[str, list[str]],
     ) -> list[str]:
         route = RouteTask(
             uuid4().hex,
-            "initialization",
+            "optimization",
             TASK_CENTRAL_ANCHOR_SELECTION,
             {
                 "referenceText": reference_text,
@@ -258,9 +254,7 @@ class InitialPopulationBuilder:
         self,
         items: list[tuple[SemanticVector, str, float]],
         reference_text: str,
-        central_anchors: list[str] | None = None,
     ) -> list[Solution]:
-        selected_anchors = list(central_anchors or [])
         candidates: list[tuple[int, SemanticVector, str, float, str]] = []
         accepted: list[Solution] = []
         rejections: list[dict[str, Any]] = []
@@ -269,12 +263,7 @@ class InitialPopulationBuilder:
                 uuid4().hex,
                 "initialization",
                 TASK_SYNTHETIC_TEXT,
-                {
-                    "prompt": prompt,
-                    "reference_text": reference_text,
-                    "centralAnchors": selected_anchors,
-                    "central_anchors": selected_anchors,
-                },
+                {"prompt": prompt, "reference_text": reference_text},
             )
             text = str(self.executor.execute(self.router.route(route))).strip()
             validation = validate_generated_text(
@@ -317,7 +306,11 @@ class InitialPopulationBuilder:
                     prompt=prompt,
                     generated_text=text,
                     objectives=Objectives(f1, 0.0),
-                    metadata={"prompt_diversity_score": diversity_score},
+                    metadata={
+                        "prompt_diversity_score": diversity_score,
+                        "used_central_anchors": False,
+                        "anchor_inclusion_probability": None,
+                    },
                 )
             )
         if len(accepted) < self.config.n:

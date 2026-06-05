@@ -154,6 +154,8 @@ class RuntimeConfig:
             "mopso.alpha",
             "mopso.p_tur_max",
             "mopso.p_tur_min",
+            "mopso.p_anchor_min",
+            "mopso.p_anchor_max",
             "mopso.tau_dup",
             "mopso.tau_tur_min",
             "mopso.tau_tur_max",
@@ -163,6 +165,12 @@ class RuntimeConfig:
                 raise ValueError(f"{path} must be non-negative")
         if float(self.get("mopso.p_tur_min")) > float(self.get("mopso.p_tur_max")):
             raise ValueError("mopso.p_tur_min must not exceed mopso.p_tur_max")
+        p_anchor_min = float(self.get("mopso.p_anchor_min", 0.05))
+        p_anchor_max = float(self.get("mopso.p_anchor_max", 0.70))
+        if p_anchor_min > p_anchor_max:
+            raise ValueError("mopso.p_anchor_min must not exceed mopso.p_anchor_max")
+        if p_anchor_max > 1.0:
+            raise ValueError("mopso.p_anchor_max must be in [0, 1]")
         if float(self.get("mopso.tau_tur_min")) > float(self.get("mopso.tau_tur_max")):
             raise ValueError("mopso.tau_tur_min must not exceed mopso.tau_tur_max")
         if int(self.get("mopso.k_retry", 0)) != 0:

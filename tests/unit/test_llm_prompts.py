@@ -4,6 +4,7 @@ import pytest
 
 from binary_mopso_cd.llm_prompts import (
     SEMANTIC_MOVE_SYSTEM_PROMPT,
+    build_anchored_text_generation_user_prompt,
     build_messages,
     parse_task_result,
     response_format_for_task,
@@ -156,7 +157,7 @@ def test_central_anchor_schema_and_parser():
         parse_task_result(TASK_CENTRAL_ANCHOR_SELECTION, '{"central_anchors": ["one", "two"]}')
 
 
-def test_synthetic_text_messages_use_central_anchors():
+def test_synthetic_text_messages_use_base_prompt_without_implicit_anchors():
     system, user = build_messages(
         TASK_SYNTHETIC_TEXT,
         {
@@ -184,6 +185,34 @@ Output rules:
 - Return only the final message."""
     assert user == (
         "Prompt to follow:\n"
+        '"""Generate a short social media message."""'
+    )
+    assert response_format_for_task(TASK_SYNTHETIC_TEXT) is None
+
+
+def test_synthetic_text_messages_use_explicit_user_prompt_override():
+    override = build_anchored_text_generation_user_prompt(
+        "Generate a short social media message.",
+        [
+            "small businesses",
+            "disaster financing options",
+            "local emergency center",
+            "verified updates",
+        ],
+    )
+
+    system, user = build_messages(
+        TASK_SYNTHETIC_TEXT,
+        {
+            "prompt": "Generate a short social media message.",
+            "userPromptOverride": override,
+            "systemPromptOverride": "custom system prompt",
+        },
+    )
+
+    assert system == "custom system prompt"
+    assert user == (
+        "Prompt to follow:\n"
         '"""Generate a short social media message."""\n\n'
         "Reference-specific anchors:\n"
         "small businesses\n"
@@ -195,7 +224,6 @@ Output rules:
         "context to preserve important information when compatible with the prompt. Do not force all anchors into the "
         "message. Do not copy the full reference text."
     )
-    assert response_format_for_task(TASK_SYNTHETIC_TEXT) is None
 
 
 def test_pool_expansion_messages_include_existing_items():

@@ -17,6 +17,7 @@ from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.generated_text_validation import validate_generated_text
+from binary_mopso_cd.llm_prompts import build_anchored_text_generation_user_prompt
 from binary_mopso_cd.metrics import archive_metrics
 from binary_mopso_cd.monitor import ObservationalMonitor
 from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
@@ -171,6 +172,7 @@ class BinaryMOPSOCDEngine:
         reference_text: str,
         central_anchors: list[str] | None = None,
         progress_logger: Any | None = None,
+        semantic_anchors: dict[str, list[str]] | None = None,
     ):
         self.config = config
         self.router = router
@@ -179,6 +181,7 @@ class BinaryMOPSOCDEngine:
         self.outdir = outdir
         self.reference_text = reference_text
         self.central_anchors = list(central_anchors or [])
+        self.semantic_anchors = {key: list(values) for key, values in (semantic_anchors or {}).items()}
         self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
@@ -332,7 +335,13 @@ class BinaryMOPSOCDEngine:
             updated.velocity[component] = particle.velocity.get(component, 0.0)
         if updated.changed:
             proposed_prompt = self._render_prompt(updated.vector)
-            proposed_text = self._generate_text(proposed_prompt)
+            used_central_anchors, anchor_probability = self._central_anchor_usage(generation)
+            user_prompt_override = (
+                build_anchored_text_generation_user_prompt(proposed_prompt, self.central_anchors)
+                if used_central_anchors
+                else None
+            )
+            proposed_text = self._generate_text(proposed_prompt, user_prompt_override=user_prompt_override)
             validation = validate_generated_text(proposed_text, self.reference_text)
             f1: float | None = None
             if validation.valid:
@@ -352,6 +361,8 @@ class BinaryMOPSOCDEngine:
                         "reason": validation.reason,
                         "f1": f1,
                         "text": proposed_text,
+                        "used_central_anchors": used_central_anchors,
+                        "anchor_inclusion_probability": anchor_probability,
                     }
                 )
                 restored = particle.clone(keep_id=True)
@@ -361,7 +372,19 @@ class BinaryMOPSOCDEngine:
             updated.prompt = proposed_prompt
             updated.generated_text = proposed_text
             updated.generation = generation
+            updated.metadata["used_central_anchors"] = used_central_anchors
+            updated.metadata["anchor_inclusion_probability"] = anchor_probability
         return updated
+
+    def _central_anchor_usage(self, generation: int) -> tuple[bool, float | None]:
+        if not self.central_anchors:
+            return False, None
+        probability = self._anchor_inclusion_probability(generation)
+        return self.rng.random() < probability, probability
+
+    def _anchor_inclusion_probability(self, generation: int) -> float:
+        rho = progress_ratio(generation - 1, self.config.iterations)
+        return self.mopso.p_anchor_min + (self.mopso.p_anchor_max - self.mopso.p_anchor_min) * rho
 
     def _guided_mode(
         self,
@@ -560,17 +583,15 @@ class BinaryMOPSOCDEngine:
         )
         return str(self.executor.execute(self.router.route(route)))
 
-    def _generate_text(self, prompt: str) -> str:
+    def _generate_text(self, prompt: str, user_prompt_override: str | None = None) -> str:
+        task_params: dict[str, Any] = {"prompt": prompt, "reference_text": self.reference_text}
+        if user_prompt_override is not None:
+            task_params["userPromptOverride"] = user_prompt_override
         route = RouteTask(
             uuid4().hex,
             "optimization",
             TASK_SYNTHETIC_TEXT,
-            {
-                "prompt": prompt,
-                "reference_text": self.reference_text,
-                "centralAnchors": self.central_anchors,
-                "central_anchors": self.central_anchors,
-            },
+            task_params,
         )
         return str(self.executor.execute(self.router.route(route))).strip()
 
@@ -595,6 +616,12 @@ class BinaryMOPSOCDEngine:
             "mean_f2": float(np.mean(f2)) if f2 else 0.0,
             "max_f2": float(np.max(f2)) if f2 else 0.0,
             "archive_size": len(self.archive.solutions),
+            "generated_with_central_anchors": sum(
+                1 for solution in population if solution.changed and solution.metadata.get("used_central_anchors") is True
+            ),
+            "generated_without_central_anchors": sum(
+                1 for solution in population if solution.changed and solution.metadata.get("used_central_anchors") is not True
+            ),
             "hypervolume": mo_metrics["hypervolume"],
             "spread": mo_metrics["spread"],
         }
@@ -643,6 +670,7 @@ class BinaryMOPSOCDEngine:
             "embedding_cache_file": str(self.config.get("runtime.embedding_cache_file", "embedding_cache.json")),
             "embedding_cache_size": self.executor.embedding_service.cache.size,
             "llm_log_file": "llm_calls.jsonl",
+            "semantic_anchors": {key: list(values) for key, values in self.semantic_anchors.items()},
             "central_anchors": list(self.central_anchors),
         }
 

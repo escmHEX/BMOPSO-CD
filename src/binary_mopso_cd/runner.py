@@ -55,23 +55,30 @@ class ExperimentRunner:
                 pbest_state = [solution_from_dict(item) for item in checkpoint_payload["pbest"]]
                 archive_state = [solution_from_dict(item) for item in checkpoint_payload["archive"]]
                 component_memory = dict(checkpoint_payload.get("component_memory", {}))
-                central_anchors = [
+                semantic_anchors = {
+                    str(key): [str(item).strip() for item in values if str(item).strip()]
+                    for key, values in dict(checkpoint_payload.get("semantic_anchors", {})).items()
+                    if isinstance(values, list)
+                }
+                start_generation = int(checkpoint_payload["generation"])
+                central_anchors: list[str] = [
                     str(item).strip()
                     for item in checkpoint_payload.get("central_anchors", [])
                     if str(item).strip()
                 ]
-                if not central_anchors:
+                if not central_anchors and start_generation < config.iterations:
                     context_builder = InitialPopulationBuilder(config, router, executor, rng)
-                    reference_context = context_builder.build_reference_context(self.reference_text)
-                    central_anchors = reference_context.central_anchors
+                    if not semantic_anchors:
+                        reference_context = context_builder.build_reference_context(self.reference_text)
+                        semantic_anchors = reference_context.semantic_anchors
+                    central_anchors = context_builder.select_central_anchors(self.reference_text, semantic_anchors)
                     write_json(
                         outdir / "reference_context.json",
                         {
-                            "semantic_anchors": reference_context.semantic_anchors,
+                            "semantic_anchors": semantic_anchors,
                             "central_anchors": central_anchors,
                         },
                     )
-                start_generation = int(checkpoint_payload["generation"])
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
@@ -79,15 +86,20 @@ class ExperimentRunner:
                 initial_builder = InitialPopulationBuilder(config, router, executor, rng)
                 initial_result = initial_builder.build_with_context(self.reference_text)
                 initial_population = initial_result.population
-                central_anchors = initial_result.central_anchors
+                semantic_anchors = initial_result.semantic_anchors
                 pbest_state = None
                 archive_state = None
                 component_memory = None
                 start_generation = 0
+                central_anchors = (
+                    initial_builder.select_central_anchors(self.reference_text, semantic_anchors)
+                    if start_generation < config.iterations
+                    else []
+                )
                 write_json(
                     outdir / "reference_context.json",
                     {
-                        "semantic_anchors": initial_result.semantic_anchors,
+                        "semantic_anchors": semantic_anchors,
                         "central_anchors": central_anchors,
                     },
                 )
@@ -102,6 +114,7 @@ class ExperimentRunner:
                 self.reference_text,
                 central_anchors,
                 progress,
+                semantic_anchors,
             )
             progress.stage(4, 6, "Ejecutando MOPSO-CD")
             population, archive = engine.run(

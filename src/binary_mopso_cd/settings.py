@@ -60,6 +60,8 @@ class MOPSOSettings:
     alpha: float
     p_tur_max: float
     p_tur_min: float
+    p_anchor_min: float
+    p_anchor_max: float
     tau_dup: float
     tau_tur_min: float
     tau_tur_max: float
@@ -80,6 +82,8 @@ class MOPSOSettings:
             alpha=float(config.get("mopso.alpha", 1.0)),
             p_tur_max=float(config.get("mopso.p_tur_max", 0.07)),
             p_tur_min=float(config.get("mopso.p_tur_min", 0.02)),
+            p_anchor_min=float(config.get("mopso.p_anchor_min", 0.05)),
+            p_anchor_max=float(config.get("mopso.p_anchor_max", 0.70)),
             tau_dup=float(config.get("mopso.tau_dup", 0.92)),
             tau_tur_min=float(config.get("mopso.tau_tur_min", 0.65)),
             tau_tur_max=float(config.get("mopso.tau_tur_max", 0.90)),
