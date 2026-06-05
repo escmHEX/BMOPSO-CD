@@ -111,7 +111,7 @@ router:
       top_p_start: 0.95
       top_p_end: 0.90
     synthetic_text_generation:
-      temperature: 0.75
+      temperature: 0.9
       top_p: 0.95
 
 semantic_components:
@@ -151,7 +151,7 @@ mopso:
   alpha: 1
   p_tur_max: 0.07
   p_tur_min: 0.02
-  p_anchor_enabled: true
+  p_anchor_enabled: false
   p_anchor_min: 0.05
   p_anchor_max: 0.30
   k_retry: 0
