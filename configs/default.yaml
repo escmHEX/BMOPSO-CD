@@ -170,5 +170,5 @@ selection:
   epsilon: 0.0001
 
 monitor:
-  enabled: true
+  enabled: false
   kmeans_clusters: 3
