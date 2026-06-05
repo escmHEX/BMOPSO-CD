@@ -106,7 +106,7 @@ router:
             temperature: 0.50
             top_p: 0.90
     semantic_component_influence_candidates:
-      temperature_start: 0.90
+      temperature_start: 0.70
       temperature_end: 0.50
       top_p_start: 0.95
       top_p_end: 0.90
