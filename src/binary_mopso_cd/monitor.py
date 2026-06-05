@@ -36,7 +36,12 @@ class ObservationalMonitor:
             return MonitorResult({"generation": generation}, 0.0)
         started = time.perf_counter()
         embeddings = np.asarray([solution.embedding for solution in solutions if solution.embedding is not None], dtype=float)
-        inertia = kmeans_global_inertia(embeddings, self.kmeans_clusters)
+        inertia = 0.0
+        if len(embeddings) >= 2:
+            from sklearn.cluster import KMeans
+
+            clusters = min(self.kmeans_clusters, len(embeddings))
+            inertia = float(KMeans(n_clusters=clusters, n_init="auto", random_state=0).fit(embeddings).inertia_)
         labels: list[str] = []
         for solution in solutions:
             for entity in self.nlp(solution.generated_text).ents:
@@ -53,12 +58,3 @@ def entity_entropy(labels: list[str]) -> float:
     total = sum(counts.values())
     return float(-sum((count / total) * np.log(count / total) for count in counts.values()))
 
-
-def kmeans_global_inertia(embeddings: np.ndarray, kmeans_clusters: int) -> float:
-    matrix = np.asarray(embeddings, dtype=float)
-    if len(matrix) < 2:
-        return 0.0
-    from sklearn.cluster import KMeans
-
-    clusters = min(int(kmeans_clusters), len(matrix))
-    return float(KMeans(n_clusters=clusters, n_init="auto", random_state=0).fit(matrix).inertia_)
