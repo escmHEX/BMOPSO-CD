@@ -4,6 +4,12 @@ import argparse
 from pathlib import Path
 
 from binary_mopso_cd.config import RuntimeConfig
+from binary_mopso_cd.external_monitoring import (
+    ExternalMonitoringComparator,
+    SpacyEntityLabeler,
+    build_comparison_embedding_service,
+    load_monitoring_specs,
+)
 from binary_mopso_cd.runner import ExperimentRunner
 from binary_mopso_cd.utils import parse_bool_assignment
 
@@ -30,6 +36,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-every", type=int, default=None, help="Checkpoint interval in generations.")
     parser.add_argument("--checkpoint-interval", type=int, default=None, help="Alias for --checkpoint-every.")
     parser.add_argument("--resume-from", type=Path, default=None, help="Checkpoint to resume from.")
+    return parser
+
+
+def build_compare_monitoring_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Recompute common observational monitoring metrics.")
+    parser.add_argument("--inputs", type=Path, required=True, help="JSON spec with comparison inputs.")
+    parser.add_argument("--outdir", type=Path, required=True, help="Output directory for comparison artifacts.")
+    parser.add_argument("--config", type=Path, default=None, help="YAML config file used for model settings.")
+    parser.add_argument("--bert-model", default=None, help="SBERT alias or model name.")
+    parser.add_argument("--spacy-model", default=None, help="spaCy model for entity labels.")
+    parser.add_argument("--kmeans-clusters", type=int, default=3, help="KMeans clusters for global inertia.")
+    parser.add_argument("--generation-column", default="generation", help="Input generation column.")
+    parser.add_argument("--text-column", default="generated_text", help="Input generated text column.")
+    parser.add_argument("--run-column", default="run", help="Input run column.")
     return parser
 
 
@@ -88,9 +108,42 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
     return config
 
 
+def run_compare_monitoring(args: argparse.Namespace) -> int:
+    config = RuntimeConfig.load(args.config)
+    if args.bert_model:
+        config.set("models.sbert.default", args.bert_model)
+    args.outdir.mkdir(parents=True, exist_ok=True)
+    embedding_service = build_comparison_embedding_service(config, args.outdir)
+    labeler = SpacyEntityLabeler(str(args.spacy_model or config.get("models.spacy.model", "en_core_web_sm")))
+    comparator = ExternalMonitoringComparator(
+        embedding_service=embedding_service,
+        entity_labeler=labeler,
+        kmeans_clusters=args.kmeans_clusters,
+        generation_column=args.generation_column,
+        text_column=args.text_column,
+        run_column=args.run_column,
+    )
+    output = comparator.compare(load_monitoring_specs(args.inputs), args.outdir)
+    embedding_service.cache.save()
+    print(output.metrics_csv)
+    print(output.global_inertia_svg)
+    print(output.entity_entropy_svg)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is not None:
+        current_argv = list(argv)
+    else:
+        import sys
+
+        current_argv = sys.argv[1:]
+    if current_argv and current_argv[0] == "compare-monitoring":
+        parser = build_compare_monitoring_parser()
+        args = parser.parse_args(current_argv[1:])
+        return run_compare_monitoring(args)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(current_argv)
     config = RuntimeConfig.load(args.config)
     config = apply_args(config, args)
     outdirs = ExperimentRunner(config, args.reference_text).run_all()
