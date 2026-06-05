@@ -151,8 +151,9 @@ mopso:
   alpha: 1
   p_tur_max: 0.07
   p_tur_min: 0.02
+  p_anchor_enabled: false
   p_anchor_min: 0.05
-  p_anchor_max: 0.6
+  p_anchor_max: 0.70
   k_retry: 0
   tau_dup: 0.92
   tau_tur_min: 0.65

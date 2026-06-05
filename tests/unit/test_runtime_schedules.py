@@ -56,8 +56,15 @@ def test_mopso_default_hyperparameters_match_strategy(test_config):
     assert settings.alpha == 1.0
     assert settings.p_tur_max == 0.07
     assert settings.p_tur_min == 0.02
+    assert settings.p_anchor_enabled is False
     assert settings.p_anchor_min == 0.05
     assert settings.p_anchor_max == 0.70
+
+
+def test_anchor_enabled_must_be_boolean(test_config):
+    test_config.set("mopso.p_anchor_enabled", "false")
+    with pytest.raises(ValueError, match="p_anchor_enabled"):
+        test_config.validate()
 
 
 def test_generated_text_validation_threshold_must_be_cosine_range(test_config):

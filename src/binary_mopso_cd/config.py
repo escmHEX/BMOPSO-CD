@@ -165,6 +165,9 @@ class RuntimeConfig:
                 raise ValueError(f"{path} must be non-negative")
         if float(self.get("mopso.p_tur_min")) > float(self.get("mopso.p_tur_max")):
             raise ValueError("mopso.p_tur_min must not exceed mopso.p_tur_max")
+        p_anchor_enabled = self.get("mopso.p_anchor_enabled", False)
+        if not isinstance(p_anchor_enabled, bool):
+            raise ValueError("mopso.p_anchor_enabled must be boolean")
         p_anchor_min = float(self.get("mopso.p_anchor_min", 0.05))
         p_anchor_max = float(self.get("mopso.p_anchor_max", 0.70))
         if p_anchor_min > p_anchor_max:

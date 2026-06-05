@@ -61,24 +61,25 @@ class ExperimentRunner:
                     if isinstance(values, list)
                 }
                 start_generation = int(checkpoint_payload["generation"])
+                should_select_central_anchors = self._should_select_central_anchors(config, start_generation)
                 central_anchors: list[str] = [
                     str(item).strip()
                     for item in checkpoint_payload.get("central_anchors", [])
                     if str(item).strip()
-                ]
-                if not central_anchors and start_generation < config.iterations:
+                ] if should_select_central_anchors else []
+                if not central_anchors and should_select_central_anchors:
                     context_builder = InitialPopulationBuilder(config, router, executor, rng)
                     if not semantic_anchors:
                         reference_context = context_builder.build_reference_context(self.reference_text)
                         semantic_anchors = reference_context.semantic_anchors
                     central_anchors = context_builder.select_central_anchors(self.reference_text, semantic_anchors)
-                    write_json(
-                        outdir / "reference_context.json",
-                        {
-                            "semantic_anchors": semantic_anchors,
-                            "central_anchors": central_anchors,
-                        },
-                    )
+                write_json(
+                    outdir / "reference_context.json",
+                    {
+                        "semantic_anchors": semantic_anchors,
+                        "central_anchors": central_anchors,
+                    },
+                )
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
@@ -93,7 +94,7 @@ class ExperimentRunner:
                 start_generation = 0
                 central_anchors = (
                     initial_builder.select_central_anchors(self.reference_text, semantic_anchors)
-                    if start_generation < config.iterations
+                    if self._should_select_central_anchors(config, start_generation)
                     else []
                 )
                 write_json(
@@ -169,3 +170,6 @@ class ExperimentRunner:
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def _should_select_central_anchors(self, config: RuntimeConfig, start_generation: int) -> bool:
+        return config.get("mopso.p_anchor_enabled", False) is True and start_generation < config.iterations

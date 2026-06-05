@@ -311,6 +311,7 @@ def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_confi
 def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_config, tmp_path):
     test_config.set("mopso.p_tur_max", 0.0)
     test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.p_anchor_enabled", True)
     test_config.set("mopso.p_anchor_min", 1.0)
     test_config.set("mopso.p_anchor_max", 1.0)
     executor = GuidedMoveExecutor()
@@ -352,9 +353,56 @@ def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_co
     assert updated.metadata["anchor_inclusion_probability"] == pytest.approx(1.0)
 
 
+def test_mopso_anchor_disabled_uses_base_prompt_without_probability_eval(test_config, tmp_path):
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.p_anchor_enabled", False)
+    test_config.set("mopso.p_anchor_min", 1.0)
+    test_config.set("mopso.p_anchor_max", 1.0)
+    executor = GuidedMoveExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+        ["bridge", "flooded roads", "request support"],
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._candidate_for_mode = lambda _component, mode, *_args: "updated topic" if mode == "cognitive" else None
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generated_text_fidelity = lambda _text: 1.0
+
+    def fail_probability(_generation):
+        raise AssertionError("anchor probability should not be evaluated")
+
+    engine._anchor_inclusion_probability = fail_probability
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
+
+    updated = engine._update_particle(particle, pbest, leader, generation=1)
+
+    synthetic_task = [task for task in executor.tasks if task.semantic_task == TASK_SYNTHETIC_TEXT][0]
+    assert "userPromptOverride" not in synthetic_task.task_params
+    assert updated.metadata["used_central_anchors"] is False
+    assert updated.metadata["anchor_inclusion_probability"] is None
+
+
 def test_mopso_update_uses_base_prompt_when_anchor_event_does_not_occur(test_config, tmp_path):
     test_config.set("mopso.p_tur_max", 0.0)
     test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.p_anchor_enabled", True)
     test_config.set("mopso.p_anchor_min", 0.0)
     test_config.set("mopso.p_anchor_max", 0.0)
     executor = GuidedMoveExecutor()

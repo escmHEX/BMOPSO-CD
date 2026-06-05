@@ -377,7 +377,7 @@ class BinaryMOPSOCDEngine:
         return updated
 
     def _central_anchor_usage(self, generation: int) -> tuple[bool, float | None]:
-        if not self.central_anchors:
+        if not self.mopso.p_anchor_enabled or not self.central_anchors:
             return False, None
         probability = self._anchor_inclusion_probability(generation)
         return self.rng.random() < probability, probability

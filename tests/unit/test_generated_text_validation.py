@@ -97,6 +97,7 @@ def test_initialization_rejects_low_fidelity_generated_text(test_config, tmp_pat
 def test_mopso_rejects_invalid_generated_text_and_preserves_velocity(test_config, tmp_path):
     test_config.set("mopso.p_tur_max", 1.0)
     test_config.set("mopso.p_tur_min", 1.0)
+    test_config.set("mopso.p_anchor_enabled", True)
     test_config.set("mopso.dmax", 1)
     rng = Random(2)
     particle = Solution(
