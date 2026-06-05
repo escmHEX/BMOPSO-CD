@@ -145,6 +145,15 @@ class ExternalArchive:
         tied = [p for p in participants if distances[p.solution_id] == best_distance]
         return self.rng.choice(tied)
 
+
+def archive_capacity(population_size: int, multiplier: float) -> int:
+    if population_size <= 0:
+        raise ValueError("population_size must be positive")
+    if multiplier <= 0:
+        raise ValueError("archive multiplier must be positive")
+    return max(1, int(math.ceil(multiplier * population_size)))
+
+
 class PBestUpdater:
     def __init__(self, weights: dict[str, float]):
         self.weights = weights
@@ -187,7 +196,7 @@ class BinaryMOPSOCDEngine:
         self.mopso = MOPSOSettings.from_config(config)
         self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
         checkpoint = CheckpointSettings.from_config(config)
-        self.archive = ExternalArchive(max_size=self.mopso.archive_multiplier * config.n, rng=rng)
+        self.archive = ExternalArchive(max_size=archive_capacity(config.n, self.mopso.archive_multiplier), rng=rng)
         self.pbest_updater = PBestUpdater(self.mopso.utility_weights)
         self.component_memory = ComponentMemoryIndex(self.components.order, executor.embedding_service)
         self.monitor = ObservationalMonitor(

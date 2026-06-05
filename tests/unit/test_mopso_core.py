@@ -10,6 +10,7 @@ from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.mopso import (
     BinaryMOPSOCDEngine,
     ExternalArchive,
+    archive_capacity,
     crowding_distance,
     dominates,
     evaluate_unique_solutions_by_signature,
@@ -131,6 +132,28 @@ def test_external_archive_keeps_non_dominated_and_prunes():
     archive = ExternalArchive(max_size=2, rng=Random(1))
     archive.update([make_solution(0.8, 0.1, 1), make_solution(0.1, 0.8, 2), make_solution(0.5, 0.5, 3)])
     assert len(archive.solutions) == 2
+
+
+def test_archive_capacity_supports_fractional_multipliers():
+    assert archive_capacity(100, 0.5) == 50
+    assert archive_capacity(100, 0.25) == 25
+    assert archive_capacity(3, 0.5) == 2
+    assert archive_capacity(3, 0.25) == 1
+
+
+def test_mopso_uses_fractional_archive_multiplier(test_config, tmp_path):
+    test_config.set("experiment.n", 4)
+    test_config.set("mopso.archive_multiplier", 0.5)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    assert engine.archive.max_size == 2
 
 
 def test_external_archive_deduplicates_by_normalized_signature():

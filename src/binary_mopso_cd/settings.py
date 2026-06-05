@@ -48,7 +48,7 @@ class InitializationSettings:
 
 @dataclass(frozen=True, slots=True)
 class MOPSOSettings:
-    archive_multiplier: int
+    archive_multiplier: float
     leader_tournament_size: int
     dmax: int
     kcand: int
@@ -71,7 +71,7 @@ class MOPSOSettings:
     @classmethod
     def from_config(cls, config: RuntimeConfig) -> "MOPSOSettings":
         return cls(
-            archive_multiplier=int(config.get("mopso.archive_multiplier", 2)),
+            archive_multiplier=float(config.get("mopso.archive_multiplier", 2)),
             leader_tournament_size=int(config.get("mopso.leader_tournament_size", 3)),
             dmax=int(config.get("mopso.dmax", 1)),
             kcand=int(config.get("mopso.kcand", 7)),

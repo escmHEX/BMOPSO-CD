@@ -52,6 +52,7 @@ def test_checkpoint_interval_validation_only_when_enabled(test_config):
 
 def test_mopso_default_hyperparameters_match_strategy(test_config):
     settings = MOPSOSettings.from_config(test_config)
+    assert settings.archive_multiplier == 2.0
     assert settings.kcand == 7
     assert settings.alpha == 1.0
     assert settings.p_tur_max == 0.07
@@ -64,6 +65,18 @@ def test_mopso_default_hyperparameters_match_strategy(test_config):
 def test_anchor_enabled_must_be_boolean(test_config):
     test_config.set("mopso.p_anchor_enabled", "false")
     with pytest.raises(ValueError, match="p_anchor_enabled"):
+        test_config.validate()
+
+
+def test_archive_multiplier_accepts_fractional_positive_values(test_config):
+    test_config.set("mopso.archive_multiplier", 0.25)
+    test_config.validate()
+    assert MOPSOSettings.from_config(test_config).archive_multiplier == 0.25
+
+
+def test_archive_multiplier_must_be_positive(test_config):
+    test_config.set("mopso.archive_multiplier", 0.0)
+    with pytest.raises(ValueError, match="archive_multiplier"):
         test_config.validate()
 
 

@@ -143,7 +143,7 @@ class RuntimeConfig:
             raise ValueError("mopso.kcand must be positive")
         if int(self.get("mopso.leader_tournament_size", 3)) <= 0:
             raise ValueError("mopso.leader_tournament_size must be positive")
-        if int(self.get("mopso.archive_multiplier", 2)) <= 0:
+        if float(self.get("mopso.archive_multiplier", 2)) <= 0:
             raise ValueError("mopso.archive_multiplier must be positive")
         for path in [
             "mopso.omega_max",
