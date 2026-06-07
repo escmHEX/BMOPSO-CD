@@ -111,8 +111,8 @@ router:
       top_p_start: 0.95
       top_p_end: 0.90
     synthetic_text_generation:
-      temperature: 0.75
-      top_p: 0.95
+      temperature: 0.85
+      top_p: 0.97
 
 semantic_components:
   order: ["role", "topic", "action"]
@@ -139,8 +139,8 @@ generated_text_validation:
   tau_gen_min: 0.05
 
 mopso:
-  archive_multiplier: 0.6
-  leader_tournament_size: 3
+  archive_multiplier: 1
+  leader_tournament_size: 5
   dmax: 1
   kcand: 7
   omega_max: 0.9
@@ -156,8 +156,8 @@ mopso:
   p_anchor_max: 0.50
   k_retry: 0
   tau_dup: 0.92
-  tau_tur_min: 0.65
-  tau_tur_max: 0.90
+  tau_tur_min: 0.6
+  tau_tur_max: 0.85
   utility_weights:
     f1: 0.5
     f2: 0.5
