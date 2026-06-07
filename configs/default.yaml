@@ -111,8 +111,8 @@ router:
       top_p_start: 0.95
       top_p_end: 0.90
     synthetic_text_generation:
-      temperature: 0.85
-      top_p: 0.97
+      temperature: 0.75
+      top_p: 0.95
 
 semantic_components:
   order: ["role", "topic", "action"]
