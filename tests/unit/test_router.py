@@ -42,7 +42,13 @@ def test_router_word_replacement_uses_distilbert_with_context(test_config):
         "1",
         "test",
         TASK_WORD_REPLACEMENT,
-        {"text": "public safety alert", "tokens": ["public", "safety", "alert"], "target_index": 1, "max_variants": 5},
+        {
+            "text": "public safety alert",
+            "targetSpan": [7, 13],
+            "targetWordLeftTokens": 1,
+            "targetWordRightTokens": 1,
+            "max_variants": 5,
+        },
     )
     assert router.route(task).alg_name == ALG_DISTILBERT
 
@@ -53,7 +59,12 @@ def test_router_word_replacement_uses_default_kcand_when_missing(test_config):
         "1",
         "test",
         TASK_WORD_REPLACEMENT,
-        {"text": "public safety alert", "tokens": ["public", "safety", "alert"], "target_index": 1},
+        {
+            "text": "public safety alert",
+            "targetSpan": [7, 13],
+            "targetWordLeftTokens": 1,
+            "targetWordRightTokens": 1,
+        },
     )
     execution = router.route(task)
     assert execution.alg_name == ALG_DISTILBERT
@@ -73,7 +84,7 @@ def test_router_word_replacement_accepts_strategy_context_fields(test_config):
             "targetWord": "safety",
             "targetWordLeftTokens": 1,
             "targetWordRightTokens": 1,
-            "target_index": 1,
+            "targetSpan": [7, 13],
             "maxVariants": 7,
         },
     )
@@ -90,6 +101,18 @@ def test_router_word_replacement_fallback_at_boundary(test_config):
         "1",
         "test",
         TASK_WORD_REPLACEMENT,
-        {"text": "safety alert", "tokens": ["safety", "alert"], "target_index": 0, "max_variants": 5},
+        {"text": "safety alert", "targetSpan": [0, 6], "targetWordLeftTokens": 0, "targetWordRightTokens": 1, "max_variants": 5},
     )
     assert router.route(task).alg_name == ALG_WORDNET_PPDB
+
+
+def test_router_word_replacement_requires_target_span(test_config):
+    router = SemanticRouter(test_config)
+    task = RouteTask("1", "test", TASK_WORD_REPLACEMENT, {"text": "safety alert"})
+
+    try:
+        router.route(task)
+    except ValueError as exc:
+        assert "targetSpan" in str(exc)
+    else:
+        raise AssertionError("targetSpan should be required")

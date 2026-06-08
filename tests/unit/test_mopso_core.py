@@ -14,6 +14,7 @@ from binary_mopso_cd.mopso import (
     crowding_distance,
     dominates,
     evaluate_unique_solutions_by_signature,
+    validate_last_guided_moves,
     utility,
 )
 from binary_mopso_cd.router import TASK_SYNTHETIC_TEXT
@@ -33,8 +34,10 @@ class StubEmbeddingService:
     def __init__(self, vectors: dict[str, list[float]]):
         self.vectors = vectors
         self.cache = StubEmbeddingCache()
+        self.calls: list[tuple[tuple[str, ...], str]] = []
 
     def encode(self, texts: list[str], text_type: str) -> np.ndarray:
+        self.calls.append((tuple(texts), text_type))
         return np.asarray([self.vectors[text] for text in texts], dtype=float)
 
 
@@ -61,8 +64,6 @@ class StubTurbulenceProvider:
                 "span": [7, 13],
                 "leftTokens": 1,
                 "rightTokens": 1,
-                "target_index": 1,
-                "tokens": ["public", "safety", "alert"],
             }
         ]
 
@@ -104,6 +105,20 @@ class GuidedMoveExecutor:
         if task.semantic_task == TASK_SYNTHETIC_TEXT:
             return "valid generated text"
         return list(self.candidates)
+
+
+class SeparatedComponentEmbeddingService:
+    def encode(self, texts: list[str], text_type: str) -> np.ndarray:
+        vectors = []
+        for text in texts:
+            vectors.append([1.0, 0.0] if str(text).startswith("current") else [0.0, 1.0])
+        return np.asarray(vectors, dtype=float)
+
+
+class SeparatedComponentExecutor(GuidedMoveExecutor):
+    def __init__(self):
+        super().__init__([])
+        self.embedding_service = SeparatedComponentEmbeddingService()
 
 
 def topic_only_components() -> ComponentSettings:
@@ -223,6 +238,37 @@ def test_unique_signature_evaluation_deduplicates_before_f2_and_propagates_resul
     assert duplicate.embedding == first.embedding
 
 
+def test_unique_signature_evaluation_preserves_existing_f1_and_refreshes_only_contextual_f2():
+    service = StubEmbeddingService(
+        {
+            "text a": [1.0, 0.0],
+            "text b": [0.0, 1.0],
+        }
+    )
+    first = Solution(
+        SemanticVector({"role": "Role A", "topic": "Topic A", "action": "Action A"}),
+        "prompt a",
+        "text a",
+        Objectives(0.25, 99.0),
+        embedding=[1.0, 0.0],
+    )
+    second = Solution(
+        SemanticVector({"role": "Role B", "topic": "Topic B", "action": "Action B"}),
+        "prompt b",
+        "text b",
+        Objectives(0.75, 99.0),
+        embedding=[0.0, 1.0],
+    )
+
+    evaluate_unique_solutions_by_signature([first, second], "reference", service)
+
+    assert first.objectives.f1 == pytest.approx(0.25)
+    assert second.objectives.f1 == pytest.approx(0.75)
+    assert first.objectives.f2 == pytest.approx(1.0)
+    assert second.objectives.f2 == pytest.approx(1.0)
+    assert service.calls == []
+
+
 def test_mopso_influence_params_use_component_spec_and_strategy_fields(test_config, tmp_path):
     executor = StubExecutor()
     engine = BinaryMOPSOCDEngine(
@@ -288,7 +334,7 @@ def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp
     assert params["targetWordLeftTokens"] == 1
     assert params["targetWordRightTokens"] == 1
     assert params["maxVariants"] == 7
-    assert params["target_index"] == 1
+    assert all("index" not in key.lower() for key in params)
 
 
 def test_mopso_text_generation_uses_base_prompt_and_checkpoint_persists_anchors(test_config, tmp_path):
@@ -328,7 +374,7 @@ def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_confi
     )
 
     assert engine._anchor_inclusion_probability(1) == pytest.approx(0.05)
-    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.70)
+    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.50)
 
 
 def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_config, tmp_path):
@@ -530,6 +576,46 @@ def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_confi
     assert updated.last_guided_move["topic"] == "cognitive"
 
 
+def test_mopso_applies_dmax_before_selecting_guided_subtype(test_config, tmp_path):
+    test_config.set("mopso.dmax", 1)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    test_config.set("mopso.c1", 100.0)
+    test_config.set("mopso.c2", 100.0)
+    test_config.set("mopso.alpha", 100.0)
+    executor = SeparatedComponentExecutor()
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    calls = []
+
+    def record_guided_mode(*_args):
+        calls.append("guided")
+        return None
+
+    engine._guided_mode = record_guided_mode
+    particle = Solution(
+        SemanticVector({"role": "current role", "topic": "current topic", "action": "current action"}),
+        "prompt",
+        "text",
+        Objectives(0.5, 0.5),
+        velocity={"role": 0.0, "topic": 0.0, "action": 0.0},
+        initial_components={"role": "current role", "topic": "current topic", "action": "current action"},
+    )
+    pbest = Solution(SemanticVector({"role": "target role", "topic": "target topic", "action": "target action"}), "p", "t")
+    leader = Solution(SemanticVector({"role": "leader role", "topic": "leader topic", "action": "leader action"}), "p", "t")
+
+    updated = engine._update_particle(particle, pbest, leader, generation=1)
+
+    assert calls == ["guided"]
+    assert updated.changed is False
+
+
 def test_mopso_inertia_repeats_last_social_move_toward_leader(test_config, tmp_path):
     executor = GuidedMoveExecutor(["leader aligned topic"])
     engine = BinaryMOPSOCDEngine(
@@ -555,7 +641,7 @@ def test_mopso_inertia_repeats_last_social_move_toward_leader(test_config, tmp_p
     assert executor.executed_task.task_params["targetComponent"] == "leader topic"
 
 
-def test_mopso_legacy_textual_last_guided_move_does_not_enable_inertia(test_config, tmp_path):
+def test_mopso_invalid_last_guided_move_fails_instead_of_enabling_inertia(test_config, tmp_path):
     executor = GuidedMoveExecutor(["leader aligned topic"])
     engine = BinaryMOPSOCDEngine(
         test_config,
@@ -574,6 +660,37 @@ def test_mopso_legacy_textual_last_guided_move_does_not_enable_inertia(test_conf
     pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
     leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
 
-    assert engine._guided_mode("topic", 10.0, 0.0, 0.0, particle) is None
-    assert engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=1) is None
+    with pytest.raises(ValueError, match="last_guided_move"):
+        validate_last_guided_moves(particle)
+    with pytest.raises(ValueError, match="last_guided_move"):
+        engine._guided_mode("topic", 10.0, 0.0, 0.0, particle)
+    with pytest.raises(ValueError, match="last_guided_move"):
+        engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=1)
     assert executor.executed_task is None
+
+
+def test_mopso_basic_candidate_filter_uses_configured_word_limits(test_config, tmp_path):
+    test_config.set("mopso.candidate_min_words", 2)
+    test_config.set("mopso.candidate_max_words", 4)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    result = engine._basic_candidates(
+        "topic",
+        "current topic",
+        [
+            "single",
+            "two words",
+            "one two three four",
+            "one two three four five",
+        ],
+        forbidden=None,
+    )
+
+    assert result == ["two words", "one two three four"]

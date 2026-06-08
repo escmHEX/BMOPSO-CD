@@ -54,18 +54,19 @@ class SemanticTaskExecutor:
         if task.alg_name == ALG_DISTILBERT:
             return self.turbulence_provider.distilbert_candidates(
                 str(task.task_params.get("text", task.task_params.get("component", ""))),
-                int(task.task_params["target_index"]),
+                list(task.task_params["targetSpan"]),
                 int(task.alg_params.get("preliminary_top_k", 15)),
                 int(task.alg_params.get("max_variants", 5)),
             )
         if task.alg_name == ALG_WORDNET_PPDB:
             return self.turbulence_provider.wordnet_candidates(
                 str(task.task_params.get("text", task.task_params.get("component", ""))),
-                int(task.task_params["target_index"]),
+                list(task.task_params["targetSpan"]),
                 int(task.alg_params.get("max_variants", 5)),
                 bool(task.alg_params.get("use_ppdb", True)),
                 target_lemma=task.task_params.get("targetLemma") or task.task_params.get("target_lemma"),
                 target_pos=task.task_params.get("targetPos") or task.task_params.get("target_pos"),
+                target_word=task.task_params.get("targetWord"),
             )
         raise ValueError(f"Unsupported algorithm: {task.alg_name}")
 

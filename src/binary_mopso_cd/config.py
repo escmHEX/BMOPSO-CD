@@ -141,6 +141,14 @@ class RuntimeConfig:
             raise ValueError("mopso.dmax must not exceed the number of active components")
         if int(self.get("mopso.kcand", 7)) <= 0:
             raise ValueError("mopso.kcand must be positive")
+        candidate_min_words = int(self.get("mopso.candidate_min_words", 2))
+        candidate_max_words = int(self.get("mopso.candidate_max_words", 8))
+        if candidate_min_words <= 0:
+            raise ValueError("mopso.candidate_min_words must be positive")
+        if candidate_max_words <= 0:
+            raise ValueError("mopso.candidate_max_words must be positive")
+        if candidate_min_words > candidate_max_words:
+            raise ValueError("mopso.candidate_min_words must not exceed mopso.candidate_max_words")
         if int(self.get("mopso.leader_tournament_size", 3)) <= 0:
             raise ValueError("mopso.leader_tournament_size must be positive")
         if float(self.get("mopso.archive_multiplier", 2)) <= 0:

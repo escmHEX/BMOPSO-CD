@@ -10,6 +10,7 @@ from binary_mopso_cd.utils import canonical_text, unique_preserve_order
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
 ALLOWED_TURBULENCE_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV"}
+TargetSpan = list[int] | tuple[int, int]
 
 
 def tokenize_component(text: str) -> list[str]:
@@ -29,14 +30,13 @@ class DistilBertFillMaskProvider:
             self._pipeline = pipeline("fill-mask", model=self.model_name)
         return self._pipeline
 
-    def candidates(self, text: str, target_index: int, preliminary_top_k: int, max_variants: int) -> list[str]:
-        tokens = tokenize_component(text)
-        if target_index < 0 or target_index >= len(tokens):
+    def candidates(self, text: str, target_span: TargetSpan, preliminary_top_k: int, max_variants: int) -> list[str]:
+        span = normalize_target_span(text, target_span)
+        if span is None:
             return []
-        target = tokens[target_index]
-        masked_tokens = list(tokens)
-        masked_tokens[target_index] = self.pipeline.tokenizer.mask_token
-        masked_text = " ".join(masked_tokens)
+        start, end = span
+        target = text[start:end]
+        masked_text = replace_span(text, span, self.pipeline.tokenizer.mask_token)
         predictions = self.pipeline(masked_text, top_k=preliminary_top_k)
         replacements: list[str] = []
         for prediction in predictions:
@@ -48,7 +48,7 @@ class DistilBertFillMaskProvider:
             if canonical_text(token) == canonical_text(target):
                 continue
             replacements.append(token)
-        return build_variants(tokens, target_index, unique_preserve_order(replacements), max_variants)
+        return build_span_variants(text, span, unique_preserve_order(replacements), max_variants)
 
 
 class WordNetPPDBProvider:
@@ -74,16 +74,18 @@ class WordNetPPDBProvider:
     def candidates(
         self,
         text: str,
-        target_index: int,
+        target_span: TargetSpan,
         max_variants: int,
         use_ppdb: bool = True,
         target_lemma: str | None = None,
         target_pos: str | None = None,
+        target_word: str | None = None,
     ) -> list[str]:
-        tokens = tokenize_component(text)
-        if target_index < 0 or target_index >= len(tokens):
+        span = normalize_target_span(text, target_span)
+        if span is None:
             return []
-        target = tokens[target_index]
+        start, end = span
+        target = target_word or text[start:end]
         replacements: list[str] = []
         if self.use_wordnet:
             wordnet_pos = spacy_pos_to_wordnet(target_pos)
@@ -102,15 +104,30 @@ class WordNetPPDBProvider:
             if not TOKEN_RE.fullmatch(value):
                 continue
             filtered.append(value)
-        return build_variants(tokens, target_index, unique_preserve_order(filtered), max_variants)
+        return build_span_variants(text, span, unique_preserve_order(filtered), max_variants)
 
 
-def build_variants(tokens: list[str], target_index: int, replacements: list[str], max_variants: int) -> list[str]:
+def normalize_target_span(text: str, target_span: TargetSpan) -> tuple[int, int] | None:
+    if len(target_span) != 2:
+        return None
+    start = int(target_span[0])
+    end = int(target_span[1])
+    if start < 0 or end <= start or end > len(text):
+        return None
+    if not text[start:end].strip():
+        return None
+    return start, end
+
+
+def replace_span(text: str, target_span: tuple[int, int], replacement: str) -> str:
+    start, end = target_span
+    return f"{text[:start]}{replacement}{text[end:]}"
+
+
+def build_span_variants(text: str, target_span: tuple[int, int], replacements: list[str], max_variants: int) -> list[str]:
     variants = []
     for replacement in replacements:
-        next_tokens = list(tokens)
-        next_tokens[target_index] = replacement
-        variants.append(" ".join(next_tokens))
+        variants.append(replace_span(text, target_span, replacement))
         if len(variants) >= max_variants:
             break
     return variants
@@ -147,28 +164,39 @@ class TurbulenceService:
             self._nlp = spacy.load(self.spacy_model)
         return self._nlp
 
-    def distilbert_candidates(self, text: str, target_index: int, preliminary_top_k: int, max_variants: int) -> list[str]:
-        return self.distilbert.candidates(text, target_index, preliminary_top_k, max_variants)
+    def distilbert_candidates(
+        self,
+        text: str,
+        target_span: TargetSpan,
+        preliminary_top_k: int,
+        max_variants: int,
+    ) -> list[str]:
+        return self.distilbert.candidates(text, target_span, preliminary_top_k, max_variants)
 
     def wordnet_candidates(
         self,
         text: str,
-        target_index: int,
+        target_span: TargetSpan,
         max_variants: int,
         use_ppdb: bool = True,
         target_lemma: str | None = None,
         target_pos: str | None = None,
+        target_word: str | None = None,
     ) -> list[str]:
-        tokens = tokenize_component(text)
-        target = tokens[target_index] if 0 <= target_index < len(tokens) else ""
+        span = normalize_target_span(text, target_span)
+        if span is None:
+            return []
+        start, end = span
+        target = target_word or text[start:end]
         lemma, pos = (target_lemma, target_pos) if target_lemma or target_pos else self._target_features(text, target)
         return self.wordnet.candidates(
             text,
-            target_index,
+            span,
             max_variants,
             use_ppdb=use_ppdb,
             target_lemma=lemma,
             target_pos=pos,
+            target_word=target,
         )
 
     def modifiable_units(self, text: str, preferred_pos: tuple[str, ...] = ()) -> list[dict[str, Any]]:
@@ -182,39 +210,27 @@ class TurbulenceService:
 
     def _all_modifiable_units(self, text: str) -> list[dict[str, Any]]:
         doc = self.nlp(text)
-        tokens = tokenize_component(text)
-        token_spans = [
-            (idx, match.group(0), match.start(), match.end())
-            for idx, match in enumerate(TOKEN_RE.finditer(text))
-        ]
-        used_indices: set[int] = set()
         units: list[dict[str, Any]] = []
-        for token in doc:
+        modifiable_tokens = [token for token in doc if self._is_modifiable_token(token)]
+        total_units = len(modifiable_tokens)
+        for idx, token in enumerate(modifiable_tokens):
             if not self._is_modifiable_token(token):
                 continue
-            target_index = self._target_index_for_token(token, token_spans, used_indices)
-            if target_index is None:
-                continue
-            used_indices.add(target_index)
             pos = str(getattr(token, "pos_", "")).upper()
-            start = int(getattr(token, "idx", token_spans[target_index][2]))
+            start = int(getattr(token, "idx", -1))
             token_text = str(getattr(token, "text", ""))
+            if start < 0:
+                continue
             units.append(
                 {
                     "text": token_text,
                     "lemma": str(getattr(token, "lemma_", token_text)),
                     "pos": pos,
                     "span": [start, start + len(token_text)],
-                    "leftTokens": len(units),
-                    "rightTokens": 0,
-                    "target_index": target_index,
-                    "tokens": tokens,
+                    "leftTokens": idx,
+                    "rightTokens": total_units - idx - 1,
                 }
             )
-        total_units = len(units)
-        for idx, unit in enumerate(units):
-            unit["leftTokens"] = idx
-            unit["rightTokens"] = total_units - idx - 1
         return units
 
     def _is_modifiable_token(self, token: Any) -> bool:
@@ -229,27 +245,6 @@ class TurbulenceService:
         if str(getattr(token, "pos_", "")).upper() not in ALLOWED_TURBULENCE_POS:
             return False
         return bool(canonical_text(str(getattr(token, "text", ""))))
-
-    def _target_index_for_token(
-        self,
-        token: Any,
-        token_spans: list[tuple[int, str, int, int]],
-        used_indices: set[int],
-    ) -> int | None:
-        token_text = canonical_text(str(getattr(token, "text", "")))
-        token_start = int(getattr(token, "idx", -1))
-        token_end = token_start + len(str(getattr(token, "text", "")))
-        for idx, text, start, end in token_spans:
-            if idx in used_indices:
-                continue
-            if canonical_text(text) != token_text:
-                continue
-            if token_start < 0 or (start < token_end and token_start < end):
-                return idx
-        for idx, text, _start, _end in token_spans:
-            if idx not in used_indices and canonical_text(text) == token_text:
-                return idx
-        return None
 
     def _target_features(self, text: str, target: str) -> tuple[str | None, str | None]:
         if not target:

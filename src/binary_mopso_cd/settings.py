@@ -52,6 +52,8 @@ class MOPSOSettings:
     leader_tournament_size: int
     dmax: int
     kcand: int
+    candidate_min_words: int
+    candidate_max_words: int
     omega_max: float
     omega_min: float
     c1: float
@@ -75,6 +77,8 @@ class MOPSOSettings:
             leader_tournament_size=int(config.get("mopso.leader_tournament_size", 3)),
             dmax=int(config.get("mopso.dmax", 1)),
             kcand=int(config.get("mopso.kcand", 7)),
+            candidate_min_words=int(config.get("mopso.candidate_min_words", 2)),
+            candidate_max_words=int(config.get("mopso.candidate_max_words", 8)),
             omega_max=float(config.get("mopso.omega_max", 0.9)),
             omega_min=float(config.get("mopso.omega_min", 0.4)),
             c1=float(config.get("mopso.c1", 1.5)),

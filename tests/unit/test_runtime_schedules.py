@@ -52,14 +52,16 @@ def test_checkpoint_interval_validation_only_when_enabled(test_config):
 
 def test_mopso_default_hyperparameters_match_strategy(test_config):
     settings = MOPSOSettings.from_config(test_config)
-    assert settings.archive_multiplier == 2.0
+    assert settings.archive_multiplier == 1.0
     assert settings.kcand == 7
+    assert settings.candidate_min_words == 2
+    assert settings.candidate_max_words == 8
     assert settings.alpha == 1.0
     assert settings.p_tur_max == 0.07
     assert settings.p_tur_min == 0.02
-    assert settings.p_anchor_enabled is False
+    assert settings.p_anchor_enabled is True
     assert settings.p_anchor_min == 0.05
-    assert settings.p_anchor_max == 0.70
+    assert settings.p_anchor_max == 0.50
 
 
 def test_anchor_enabled_must_be_boolean(test_config):
@@ -77,6 +79,16 @@ def test_archive_multiplier_accepts_fractional_positive_values(test_config):
 def test_archive_multiplier_must_be_positive(test_config):
     test_config.set("mopso.archive_multiplier", 0.0)
     with pytest.raises(ValueError, match="archive_multiplier"):
+        test_config.validate()
+
+
+def test_candidate_word_limits_must_be_valid(test_config):
+    test_config.set("mopso.candidate_min_words", 0)
+    with pytest.raises(ValueError, match="candidate_min_words"):
+        test_config.validate()
+    test_config.set("mopso.candidate_min_words", 3)
+    test_config.set("mopso.candidate_max_words", 2)
+    with pytest.raises(ValueError, match="candidate_min_words"):
         test_config.validate()
 
 

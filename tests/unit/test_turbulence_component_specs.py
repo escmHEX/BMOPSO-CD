@@ -46,7 +46,6 @@ def test_turbulence_units_prefer_component_pos_when_available():
 
     assert [unit["text"] for unit in units] == ["officials", "residents"]
     assert all(unit["pos"] == "NOUN" for unit in units)
-    assert units[0]["target_index"] == 1
     assert units[0]["span"] == [6, 15]
 
 

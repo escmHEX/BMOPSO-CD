@@ -228,7 +228,8 @@ def _format_other_components(value: Any) -> str:
 
 def _format_central_anchors(value: Any) -> str:
     if isinstance(value, list):
-        return "\n".join(str(item).strip() for item in value if str(item).strip())
+        anchors = [str(item).strip() for item in value if str(item).strip()]
+        return json.dumps(anchors, ensure_ascii=False)
     return str(value or "").strip()
 
 
@@ -469,13 +470,12 @@ def parse_task_result(semantic_task: str, raw: str) -> Any:
             raise ValueError("central_anchor_selection must return between 3 and 5 central anchors")
         return anchors
     if semantic_task in {TASK_POOL_GENERATION, TASK_POOL_EXPANSION}:
-        if isinstance(payload, dict):
-            items = payload.get("items")
-            if not isinstance(items, list):
-                raise ValueError(f"{semantic_task} must return a JSON object with an items array")
-            payload = items
-        if not isinstance(payload, list):
-            raise ValueError(f"{semantic_task} must return a JSON array")
+        if not isinstance(payload, dict):
+            raise ValueError(f"{semantic_task} must return a JSON object with an items array")
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise ValueError(f"{semantic_task} must return a JSON object with an items array")
+        payload = items
         return [str(item).strip() for item in payload if str(item).strip()]
     return payload
 
@@ -485,15 +485,7 @@ def parse_influence_candidates(raw: str) -> list[str]:
     if not text:
         return []
     if text.startswith(("[", "{")) or "```" in text:
-        try:
-            payload = parse_json_payload(text)
-        except ValueError:
-            payload = None
-        if isinstance(payload, dict):
-            lists = [value for value in payload.values() if isinstance(value, list)]
-            payload = lists[0] if lists else payload
-        if isinstance(payload, list):
-            return _clean_candidate_lines(str(item) for item in payload)
+        raise ValueError("Influence candidates must use plain numbered lines")
     return _clean_candidate_lines(text.splitlines())
 
 

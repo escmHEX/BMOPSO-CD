@@ -20,7 +20,7 @@ from binary_mopso_cd.generated_text_validation import validate_generated_text
 from binary_mopso_cd.llm_prompts import build_anchored_text_generation_user_prompt
 from binary_mopso_cd.metrics import archive_metrics
 from binary_mopso_cd.monitor import ObservationalMonitor
-from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
+from binary_mopso_cd.objectives import semantic_diversity_scores, semantic_fidelity_scores
 from binary_mopso_cd.router import (
     TASK_INFLUENCE,
     TASK_PROMPT_RENDERING,
@@ -110,11 +110,41 @@ def evaluate_unique_solutions_by_signature(
     embedding_service: EmbeddingService,
 ) -> list[Solution]:
     unique_solutions = deduplicate_solutions_by_signature(solutions)
-    evaluate_solutions(unique_solutions, reference_text, embedding_service)
+    if not unique_solutions:
+        return solutions
+    missing_embedding = [solution for solution in unique_solutions if solution.embedding is None]
+    if missing_embedding:
+        embeddings = embedding_service.encode(
+            [solution.generated_text for solution in missing_embedding],
+            text_type="generated_text",
+        )
+        for solution, embedding in zip(missing_embedding, embeddings, strict=True):
+            solution.embedding = [float(value) for value in embedding]
+    missing_f1 = [solution for solution in unique_solutions if solution.objectives is None]
+    if missing_f1:
+        reference_embedding = embedding_service.encode([reference_text], text_type="reference_text")[0]
+        for solution in missing_f1:
+            embedding = np.asarray(solution.embedding, dtype=float)
+            solution.objectives = Objectives(float(embedding @ reference_embedding), 0.0)
+    embedding_matrix = np.asarray([solution.embedding for solution in unique_solutions], dtype=float)
+    f2_values = semantic_diversity_scores(embedding_matrix)
+    for solution, f2 in zip(unique_solutions, f2_values, strict=True):
+        if solution.objectives is None:
+            raise ValueError("Solution objective f1 is required before contextual f2 refresh")
+        solution.objectives = Objectives(solution.objectives.f1, float(f2))
     evaluated_by_signature = {solution.vector.signature(): solution for solution in unique_solutions}
     for solution in solutions:
         copy_evaluation(evaluated_by_signature[solution.vector.signature()], solution)
     return solutions
+
+
+def validate_last_guided_moves(solution: Solution) -> None:
+    for component, movement in solution.last_guided_move.items():
+        if movement not in GUIDED_MOVES:
+            raise ValueError(
+                f"Invalid last_guided_move for component {component!r}: "
+                "expected 'cognitive' or 'social'"
+            )
 
 
 @dataclass
@@ -221,8 +251,12 @@ class BinaryMOPSOCDEngine:
     ) -> tuple[list[Solution], ExternalArchive]:
         population = [solution.clone(keep_id=True) for solution in initial_population]
         pbest = [solution.clone() for solution in (pbest_state or population)]
+        for solution in population + pbest:
+            validate_last_guided_moves(solution)
         if archive_state is not None:
             self.archive.solutions = [solution.clone() for solution in archive_state]
+            for solution in self.archive.solutions:
+                validate_last_guided_moves(solution)
         else:
             self.archive.update(population)
         if component_memory is not None:
@@ -291,10 +325,11 @@ class BinaryMOPSOCDEngine:
         return population, self.archive
 
     def _update_particle(self, particle: Solution, pbest: Solution, leader: Solution, generation: int) -> Solution:
+        validate_last_guided_moves(particle)
         updated = particle.clone(keep_id=True)
         updated.changed = False
         active_components = self.components.active
-        candidates: list[tuple[str, str, float]] = []
+        candidates: list[tuple[str, str, float, float, float, float]] = []
         schedule_index = generation - 1
         rho = progress_ratio(schedule_index, self.config.iterations)
         omega = self.mopso.omega_max - (self.mopso.omega_max - self.mopso.omega_min) * rho
@@ -323,13 +358,18 @@ class BinaryMOPSOCDEngine:
             if roll < p_tur:
                 mode = "turbulence"
             elif self.rng.random() < q_pso:
-                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle)
+                mode = "guided"
             if mode:
-                candidates.append((component, mode, q_eff))
+                candidates.append((component, mode, q_eff, s_in_weight, s_cog, s_soc))
         max_changes = min(self.mopso.dmax, len(candidates))
         if len(candidates) > max_changes:
             candidates = weighted_sample_without_replacement(candidates, max_changes, self.rng)
-        for component, mode, _weight in candidates:
+        for component, mode, _weight, s_in_weight, s_cog, s_soc in candidates:
+            if mode == "guided":
+                guided_mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle)
+                if guided_mode is None:
+                    continue
+                mode = guided_mode
             effective_mode = self._effective_candidate_mode(component, mode, updated)
             if effective_mode is None:
                 continue
@@ -380,6 +420,7 @@ class BinaryMOPSOCDEngine:
                 return restored
             updated.prompt = proposed_prompt
             updated.generated_text = proposed_text
+            updated.objectives = Objectives(float(f1), particle.objectives.f2 if particle.objectives else 0.0)
             updated.generation = generation
             updated.metadata["used_central_anchors"] = used_central_anchors
             updated.metadata["anchor_inclusion_probability"] = anchor_probability
@@ -452,8 +493,15 @@ class BinaryMOPSOCDEngine:
         return None
 
     def _last_guided_move(self, component: str, particle: Solution) -> str | None:
-        movement = str(particle.last_guided_move.get(component, "")).strip().lower()
-        return movement if movement in GUIDED_MOVES else None
+        if component not in particle.last_guided_move:
+            return None
+        movement = particle.last_guided_move[component]
+        if movement not in GUIDED_MOVES:
+            raise ValueError(
+                f"Invalid last_guided_move for component {component!r}: "
+                "expected 'cognitive' or 'social'"
+            )
+        return movement
 
     def _influence_task_params(
         self,
@@ -509,8 +557,6 @@ class BinaryMOPSOCDEngine:
                 "targetWordRightTokens": selected["rightTokens"],
                 "maxVariants": self.mopso.kcand,
                 "text": current,
-                "tokens": selected["tokens"],
-                "target_index": selected["target_index"],
                 "target_lemma": selected["lemma"],
                 "target_pos": selected["pos"],
                 "max_variants": self.mopso.kcand,
@@ -569,7 +615,8 @@ class BinaryMOPSOCDEngine:
         seen: set[str] = set()
         current_key = canonical_text(current)
         forbidden_key = canonical_text(forbidden) if forbidden is not None else None
-        max_words = self.components.max_words[component]
+        min_words = self.mopso.candidate_min_words
+        max_words = self.mopso.candidate_max_words
         for candidate in raw_candidates:
             text = str(candidate).strip()
             key = canonical_text(text)
@@ -577,7 +624,8 @@ class BinaryMOPSOCDEngine:
                 continue
             if forbidden_key is not None and key == forbidden_key:
                 continue
-            if word_count(text) > max_words:
+            words = word_count(text)
+            if words < min_words or words > max_words:
                 continue
             seen.add(key)
             result.append(text)
@@ -685,12 +733,12 @@ class BinaryMOPSOCDEngine:
 
 
 def weighted_sample_without_replacement(
-    candidates: list[tuple[str, str, float]],
+    candidates: list[tuple[str, str, float, float, float, float]],
     count: int,
     rng: Random,
-) -> list[tuple[str, str, float]]:
+) -> list[tuple[str, str, float, float, float, float]]:
     pool = list(candidates)
-    selected: list[tuple[str, str, float]] = []
+    selected: list[tuple[str, str, float, float, float, float]] = []
     while pool and len(selected) < count:
         total = sum(max(item[2], 0.0) for item in pool)
         if total <= 0.0:

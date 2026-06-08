@@ -215,10 +215,7 @@ def test_synthetic_text_messages_use_explicit_user_prompt_override():
         "Prompt to follow:\n"
         '"""Generate a short social media message."""\n\n'
         "Reference-specific anchors:\n"
-        "small businesses\n"
-        "disaster financing options\n"
-        "local emergency center\n"
-        "verified updates\n\n"
+        '["small businesses", "disaster financing options", "local emergency center", "verified updates"]\n\n'
         "Instruction:\n"
         "Follow the prompt as the main generation instruction. Use the reference-specific anchors only as semantic "
         "context to preserve important information when compatible with the prompt. Do not force all anchors into the "
@@ -248,13 +245,14 @@ def test_pool_expansion_messages_include_existing_items():
     assert user.endswith("Additional instruction:\nReturn communicative intents.")
 
 
-def test_pool_schema_and_parser_prefer_items_object_but_accept_legacy_array():
+def test_pool_schema_and_parser_require_items_object():
     schema = response_format_for_task(TASK_POOL_GENERATION)
 
     assert schema["type"] == "object"
     assert schema["required"] == ["items"]
     assert parse_task_result(TASK_POOL_GENERATION, '{"items": ["a", " b ", ""]}') == ["a", "b"]
-    assert parse_task_result(TASK_POOL_EXPANSION, '["legacy a", "legacy b"]') == ["legacy a", "legacy b"]
+    with pytest.raises(ValueError, match="items array"):
+        parse_task_result(TASK_POOL_EXPANSION, '["old a", "old b"]')
     with pytest.raises(ValueError, match="items array"):
         parse_task_result(TASK_POOL_GENERATION, '{"values": ["a"]}')
 
@@ -314,8 +312,6 @@ def test_influence_uses_plain_text_response_and_parses_numbered_lines():
     ]
 
 
-def test_influence_parser_accepts_legacy_json_array():
-    assert parse_task_result(TASK_INFLUENCE, '[" warn residents ", "alert locals"]') == [
-        "warn residents",
-        "alert locals",
-    ]
+def test_influence_parser_requires_plain_numbered_lines():
+    with pytest.raises(ValueError, match="plain numbered lines"):
+        parse_task_result(TASK_INFLUENCE, '[" warn residents ", "alert locals"]')

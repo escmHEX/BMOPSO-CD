@@ -58,5 +58,15 @@ def test_wordnet_ppdb_operator_keeps_word_replacements_only(tmp_path):
     index = PPDBSQLiteIndex(tmp_path / "ppdb.sqlite", source)
     provider = WordNetPPDBProvider(index, use_wordnet=False)
 
-    assert provider.candidates("help", target_index=0, max_variants=5, use_ppdb=True) == ["support"]
+    assert provider.candidates("help", [0, 4], max_variants=5, use_ppdb=True) == ["support"]
+    index.close()
+
+
+def test_wordnet_ppdb_operator_replaces_target_span_without_reformatting_text(tmp_path):
+    source = tmp_path / "ppdb.txt"
+    write_ppdb(source, [("help", "support")])
+    index = PPDBSQLiteIndex(tmp_path / "ppdb.sqlite", source)
+    provider = WordNetPPDBProvider(index, use_wordnet=False)
+
+    assert provider.candidates("urgent help, now", [7, 11], max_variants=5, use_ppdb=True) == ["urgent support, now"]
     index.close()

@@ -143,6 +143,8 @@ mopso:
   leader_tournament_size: 5
   dmax: 1
   kcand: 7
+  candidate_min_words: 2
+  candidate_max_words: 8
   omega_max: 0.9
   omega_min: 0.4
   c1: 1.5

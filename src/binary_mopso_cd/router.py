@@ -139,8 +139,8 @@ class SemanticRouter:
         return dict(self.config.get("router.llm_params.disabled_default"))
 
     def _route_word_replacement(self, task: RouteTask) -> ExecutionTask:
-        tokens = list(task.task_params.get("tokens", []))
-        index = int(task.task_params.get("target_index", -1))
+        if "targetSpan" not in task.task_params:
+            raise ValueError("word_replacement_candidates requires targetSpan")
         max_variants = int(
             task.task_params.get(
                 "maxVariants",
@@ -149,7 +149,7 @@ class SemanticRouter:
         )
         left_tokens = int(task.task_params.get("targetWordLeftTokens", 0))
         right_tokens = int(task.task_params.get("targetWordRightTokens", 0))
-        has_context = (index > 0 and index < len(tokens) - 1) or (left_tokens > 0 and right_tokens > 0)
+        has_context = left_tokens > 0 and right_tokens > 0
         if bool(self.config.get("router.heuristics.word_replacement_candidates", True)) and has_context:
             alg_params = {
                 "preliminary_top_k": int(self.config.get("models.distilbert.top_k_multiplier", 3)) * max_variants,
