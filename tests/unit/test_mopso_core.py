@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from random import Random
 
@@ -694,3 +695,86 @@ def test_mopso_basic_candidate_filter_uses_configured_word_limits(test_config, t
     )
 
     assert result == ["two words", "one two three four"]
+
+
+def test_mopso_parallel_update_freezes_leaders_and_preserves_order(test_config, tmp_path):
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.particle_update_max_concurrent", 2)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    leaders = [
+        Solution(SemanticVector({"role": "leader role 1", "topic": "leader topic 1", "action": "leader action 1"}), "p", "leader 1"),
+        Solution(SemanticVector({"role": "leader role 2", "topic": "leader topic 2", "action": "leader action 2"}), "p", "leader 2"),
+    ]
+    selected_leaders = []
+
+    def select_leader(_tournament_size):
+        leader = leaders[len(selected_leaders)]
+        selected_leaders.append(leader.generated_text)
+        return leader
+
+    async def update_async(particle, _pbest, leader, _generation, rng):
+        assert selected_leaders == ["leader 1", "leader 2"]
+        updated = particle.clone(keep_id=True)
+        updated.metadata["leader"] = leader.generated_text
+        updated.metadata["rng_probe"] = rng.random()
+        return updated, []
+
+    engine.archive.select_leader = select_leader
+    engine._update_particle_async = update_async
+    population = [
+        Solution(SemanticVector({"role": "role 1", "topic": "topic 1", "action": "action 1"}), "p1", "text 1"),
+        Solution(SemanticVector({"role": "role 2", "topic": "topic 2", "action": "action 2"}), "p2", "text 2"),
+    ]
+    pbest = [solution.clone() for solution in population]
+
+    updated = engine._update_population(population, pbest, generation=1)
+
+    assert [solution.generated_text for solution in updated] == ["text 1", "text 2"]
+    assert [solution.metadata["leader"] for solution in updated] == ["leader 1", "leader 2"]
+    assert selected_leaders == ["leader 1", "leader 2"]
+
+
+def test_mopso_parallel_worker_error_returns_original_particle(test_config, tmp_path):
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.particle_update_max_concurrent", 2)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    leader = Solution(SemanticVector({"role": "leader role", "topic": "leader topic", "action": "leader action"}), "p", "leader")
+    engine.archive.select_leader = lambda _tournament_size: leader
+
+    async def update_async(_particle, _pbest, _leader, _generation, _rng):
+        raise RuntimeError("worker failed")
+
+    engine._update_particle_async = update_async
+    particle = Solution(
+        SemanticVector({"role": "role 1", "topic": "topic 1", "action": "action 1"}),
+        "prompt",
+        "original text",
+        changed=True,
+    )
+
+    updated = engine._update_population([particle], [particle.clone()], generation=1)
+
+    assert len(updated) == 1
+    assert updated[0].generated_text == "original text"
+    assert updated[0].changed is False
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "particle_update_errors.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[0]["generation"] == 1
+    assert rows[0]["index"] == 0
+    assert "worker failed" in rows[0]["error"]

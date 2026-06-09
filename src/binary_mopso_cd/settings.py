@@ -47,6 +47,23 @@ class InitializationSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ParallelismSettings:
+    enabled: bool
+    particle_update_max_concurrent: int
+    initial_text_generation_max_concurrent: int
+
+    @classmethod
+    def from_config(cls, config: RuntimeConfig) -> "ParallelismSettings":
+        return cls(
+            enabled=config.get("parallelism.enabled", True) is True,
+            particle_update_max_concurrent=int(config.get("parallelism.particle_update_max_concurrent", 10)),
+            initial_text_generation_max_concurrent=int(
+                config.get("parallelism.initial_text_generation_max_concurrent", 10)
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class MOPSOSettings:
     archive_multiplier: float
     leader_tournament_size: int

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from binary_mopso_cd.async_utils import run_async, run_limited
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.executor import SemanticTaskExecutor
@@ -24,7 +25,7 @@ from binary_mopso_cd.router import (
     RouteTask,
     SemanticRouter,
 )
-from binary_mopso_cd.settings import ComponentSettings, InitializationSettings
+from binary_mopso_cd.settings import ComponentSettings, InitializationSettings, ParallelismSettings
 from binary_mopso_cd.utils import canonical_text, unique_preserve_order, word_count
 
 
@@ -50,6 +51,7 @@ class InitialPopulationBuilder:
         self.rng = rng
         self.components = ComponentSettings.from_config(config)
         self.settings = InitializationSettings.from_config(config)
+        self.parallelism = ParallelismSettings.from_config(config)
         self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
 
     def build(self, reference_text: str) -> list[Solution]:
@@ -255,26 +257,34 @@ class InitialPopulationBuilder:
         items: list[tuple[SemanticVector, str, float]],
         reference_text: str,
     ) -> list[Solution]:
-        candidates: list[tuple[int, SemanticVector, str, float, str]] = []
         accepted: list[Solution] = []
         rejections: list[dict[str, Any]] = []
-        for index, (vector, prompt, diversity_score) in enumerate(items):
-            route = RouteTask(
-                uuid4().hex,
-                "initialization",
-                TASK_SYNTHETIC_TEXT,
-                {"prompt": prompt, "reference_text": reference_text},
-            )
-            text = str(self.executor.execute(self.router.route(route))).strip()
+        if self.parallelism.enabled and self.parallelism.initial_text_generation_max_concurrent > 1:
+            generated_results = run_async(self._generate_initial_texts_parallel(items, reference_text))
+        else:
+            generated_results = self._generate_initial_texts_serial(items, reference_text)
+        candidates: list[tuple[int, SemanticVector, str, float, str]] = []
+        for result in generated_results:
+            if result["error"] is not None:
+                rejections.append(
+                    self._rejection_row(
+                        "text_generation_failed",
+                        "",
+                        index=result["index"],
+                        error=result["error"],
+                    )
+                )
+                continue
+            text = result["text"]
             validation = validate_generated_text(
                 text,
                 reference_text,
                 max_sentences=self.settings.generated_sentences_max,
             )
             if not validation.valid:
-                rejections.append(self._rejection_row(validation.reason, text, index=index))
+                rejections.append(self._rejection_row(validation.reason, text, index=result["index"]))
                 continue
-            candidates.append((index, vector, prompt, diversity_score, text))
+            candidates.append((result["index"], result["vector"], result["prompt"], result["diversity_score"], text))
 
         if candidates:
             f1_values = semantic_fidelity_scores(
@@ -322,6 +332,83 @@ class InitialPopulationBuilder:
         if rejections:
             self._write_rejections(rejections)
         return accepted
+
+    def _generate_initial_texts_serial(
+        self,
+        items: list[tuple[SemanticVector, str, float]],
+        reference_text: str,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for index, (vector, prompt, diversity_score) in enumerate(items):
+            try:
+                text = self._generate_initial_text(prompt, reference_text)
+                error = None
+            except Exception as exc:
+                text = ""
+                error = str(exc)
+            results.append(
+                {
+                    "index": index,
+                    "vector": vector,
+                    "prompt": prompt,
+                    "diversity_score": diversity_score,
+                    "text": text,
+                    "error": error,
+                }
+            )
+        return results
+
+    async def _generate_initial_texts_parallel(
+        self,
+        items: list[tuple[SemanticVector, str, float]],
+        reference_text: str,
+    ) -> list[dict[str, Any]]:
+        jobs = [
+            {
+                "index": index,
+                "vector": vector,
+                "prompt": prompt,
+                "diversity_score": diversity_score,
+            }
+            for index, (vector, prompt, diversity_score) in enumerate(items)
+        ]
+
+        async def worker(job: dict[str, Any]) -> dict[str, Any]:
+            try:
+                text = await self._generate_initial_text_async(str(job["prompt"]), reference_text)
+                error = None
+            except Exception as exc:
+                text = ""
+                error = str(exc)
+            return {**job, "text": text, "error": error}
+
+        return await run_limited(
+            jobs,
+            self.parallelism.initial_text_generation_max_concurrent,
+            worker,
+        )
+
+    def _generate_initial_text(self, prompt: str, reference_text: str) -> str:
+        route = RouteTask(
+            uuid4().hex,
+            "initialization",
+            TASK_SYNTHETIC_TEXT,
+            {"prompt": prompt, "reference_text": reference_text},
+        )
+        return str(self.executor.execute(self.router.route(route))).strip()
+
+    async def _generate_initial_text_async(self, prompt: str, reference_text: str) -> str:
+        route = RouteTask(
+            uuid4().hex,
+            "initialization",
+            TASK_SYNTHETIC_TEXT,
+            {"prompt": prompt, "reference_text": reference_text},
+        )
+        task = self.router.route(route)
+        execute_async = getattr(self.executor, "execute_async", None)
+        if callable(execute_async):
+            return str(await execute_async(task)).strip()
+        return str(self.executor.execute(task)).strip()
 
     def _rejection_row(self, reason: str | None, text: str, **metadata: Any) -> dict[str, Any]:
         row = {

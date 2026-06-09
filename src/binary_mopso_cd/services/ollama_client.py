@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from threading import Lock
 from typing import Any
+
+from binary_mopso_cd.async_utils import run_async
 
 
 NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -56,14 +59,16 @@ def ollama_usage_metadata(response: Any) -> dict[str, Any]:
 class LLMCallLogger:
     def __init__(self, path: Path | None):
         self.path = path
+        self._lock = Lock()
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(self, payload: dict[str, Any]) -> None:
         if self.path is None:
             return
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        with self._lock:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 class OllamaChatClient:
@@ -74,15 +79,39 @@ class OllamaChatClient:
         think: bool | str | None = False,
         logger: LLMCallLogger | None = None,
     ):
-        from ollama import Client
+        from ollama import AsyncClient
 
         self.host = host
         self.timeout_seconds = timeout_seconds
         self.think = think
-        self.client = Client(host=host, timeout=timeout_seconds)
+        self.async_client = None
+        self.async_client_factory = AsyncClient
         self.logger = logger or LLMCallLogger(None)
 
     def chat(
+        self,
+        *,
+        task_id: str,
+        semantic_task: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        options: dict[str, Any],
+        response_format: Any,
+    ) -> str:
+        return run_async(
+            self.chat_async(
+                task_id=task_id,
+                semantic_task=semantic_task,
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                options=options,
+                response_format=response_format,
+            )
+        )
+
+    async def chat_async(
         self,
         *,
         task_id: str,
@@ -98,14 +127,26 @@ class OllamaChatClient:
             {"role": "user", "content": user_prompt},
         ]
         started = time.perf_counter()
-        response = self.client.chat(
-            model=model,
-            messages=messages,
-            options=options,
-            stream=False,
-            think=self.think,
-            format=response_format,
-        )
+        client = getattr(self, "async_client", None)
+        if client is not None:
+            response = await client.chat(
+                model=model,
+                messages=messages,
+                options=options,
+                stream=False,
+                think=self.think,
+                format=response_format,
+            )
+        else:
+            async with self.async_client_factory(host=self.host, timeout=self.timeout_seconds) as scoped_client:
+                response = await scoped_client.chat(
+                    model=model,
+                    messages=messages,
+                    options=options,
+                    stream=False,
+                    think=self.think,
+                    format=response_format,
+                )
         elapsed = time.perf_counter() - started
         content = response_message_content(response)
         self.logger.log(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from binary_mopso_cd.router import TASK_INFLUENCE, RouteTask, SemanticRouter
-from binary_mopso_cd.settings import MOPSOSettings
+from binary_mopso_cd.settings import MOPSOSettings, ParallelismSettings
 from binary_mopso_cd.utils import progress_ratio
 
 
@@ -67,6 +67,28 @@ def test_mopso_default_hyperparameters_match_strategy(test_config):
 def test_anchor_enabled_must_be_boolean(test_config):
     test_config.set("mopso.p_anchor_enabled", "false")
     with pytest.raises(ValueError, match="p_anchor_enabled"):
+        test_config.validate()
+
+
+def test_parallelism_defaults_match_strategy(test_config):
+    settings = ParallelismSettings.from_config(test_config)
+
+    assert settings.enabled is True
+    assert settings.particle_update_max_concurrent == 10
+    assert settings.initial_text_generation_max_concurrent == 10
+
+
+def test_parallelism_validation(test_config):
+    test_config.set("parallelism.enabled", "true")
+    with pytest.raises(ValueError, match="parallelism.enabled"):
+        test_config.validate()
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.particle_update_max_concurrent", 0)
+    with pytest.raises(ValueError, match="particle_update_max_concurrent"):
+        test_config.validate()
+    test_config.set("parallelism.particle_update_max_concurrent", 1)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 0)
+    with pytest.raises(ValueError, match="initial_text_generation_max_concurrent"):
         test_config.validate()
 
 

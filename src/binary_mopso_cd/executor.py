@@ -70,6 +70,11 @@ class SemanticTaskExecutor:
             )
         raise ValueError(f"Unsupported algorithm: {task.alg_name}")
 
+    async def execute_async(self, task: ExecutionTask) -> Any:
+        if task.alg_name == ALG_LLM:
+            return await self._execute_llm_async(task)
+        return self.execute(task)
+
     def _execute_llm(self, task: ExecutionTask) -> Any:
         system_prompt, user_prompt = build_messages(task.semantic_task, task.task_params)
         options = {
@@ -77,6 +82,23 @@ class SemanticTaskExecutor:
             "top_p": float(task.alg_params.get("top_p", 0.9)),
         }
         raw = self.llm_client.chat(
+            task_id=task.task_id,
+            semantic_task=task.semantic_task,
+            model=str(task.alg_params["model"]),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            options=options,
+            response_format=response_format_for_task(task.semantic_task),
+        )
+        return parse_task_result(task.semantic_task, raw)
+
+    async def _execute_llm_async(self, task: ExecutionTask) -> Any:
+        system_prompt, user_prompt = build_messages(task.semantic_task, task.task_params)
+        options = {
+            "temperature": float(task.alg_params.get("temperature", 0.6)),
+            "top_p": float(task.alg_params.get("top_p", 0.9)),
+        }
+        raw = await self.llm_client.chat_async(
             task_id=task.task_id,
             semantic_task=task.semantic_task,
             model=str(task.alg_params["model"]),

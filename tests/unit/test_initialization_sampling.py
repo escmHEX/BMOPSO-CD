@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from random import Random
 
 import numpy as np
@@ -87,6 +88,35 @@ class TextRecordingExecutor:
         return self.texts.pop(0)
 
 
+class AsyncTextRecordingExecutor:
+    def __init__(self, texts_by_prompt: dict[str, str], delays_by_prompt: dict[str, float] | None = None):
+        self.tasks = []
+        self.texts_by_prompt = dict(texts_by_prompt)
+        self.delays_by_prompt = dict(delays_by_prompt or {})
+        self.embedding_service = ConstantEmbeddingService()
+        self.outdir = None
+        self.active = 0
+        self.max_active = 0
+
+    async def execute_async(self, task):
+        self.tasks.append(task)
+        prompt = str(task.task_params["prompt"])
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(self.delays_by_prompt.get(prompt, 0.0))
+            value = self.texts_by_prompt[prompt]
+            if isinstance(value, Exception):
+                raise value
+            return value
+        finally:
+            self.active -= 1
+
+    def execute(self, task):
+        self.tasks.append(task)
+        return self.texts_by_prompt[str(task.task_params["prompt"])]
+
+
 def test_build_pool_passes_strategy_component_context(test_config):
     executor = RecordingExecutor()
     builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
@@ -159,3 +189,43 @@ def test_generate_texts_uses_base_prompt_without_central_anchors(test_config):
     assert all("centralAnchors" not in task.task_params for task in synthetic_tasks)
     assert all("userPromptOverride" not in task.task_params for task in synthetic_tasks)
     assert all(solution.metadata["used_central_anchors"] is False for solution in generated)
+
+
+def test_generate_texts_parallel_preserves_input_order(test_config):
+    test_config.set("experiment.n", 2)
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 2)
+    executor = AsyncTextRecordingExecutor(
+        {"prompt one": "first generated text.", "prompt two": "second generated text."},
+        {"prompt one": 0.02, "prompt two": 0.0},
+    )
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+    items = [
+        (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
+        (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
+    ]
+
+    generated = builder._generate_texts(items, "reference text")
+
+    assert [solution.generated_text for solution in generated] == ["first generated text.", "second generated text."]
+    assert executor.max_active == 2
+
+
+def test_generate_texts_parallel_excludes_failed_generation(test_config, tmp_path):
+    test_config.set("experiment.n", 1)
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 2)
+    executor = AsyncTextRecordingExecutor(
+        {"prompt one": RuntimeError("llm failed"), "prompt two": "second generated text."}
+    )
+    executor.outdir = tmp_path
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+    items = [
+        (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
+        (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
+    ]
+
+    generated = builder._generate_texts(items, "reference text")
+
+    assert [solution.generated_text for solution in generated] == ["second generated text."]
+    assert "text_generation_failed" in (tmp_path / "initialization_rejections.jsonl").read_text(encoding="utf-8")

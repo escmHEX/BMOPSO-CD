@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from binary_mopso_cd.services.ollama_client import LLMCallLogger, OllamaChatClient, ollama_usage_metadata
@@ -27,8 +28,8 @@ def test_ollama_usage_metadata_converts_nanoseconds_and_token_counts():
 
 
 def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_path):
-    class StubClient:
-        def chat(self, **_kwargs):
+    class StubAsyncClient:
+        async def chat(self, **_kwargs):
             return {
                 "message": {"content": "generated text"},
                 "total_duration": 1_000_000_000,
@@ -40,7 +41,7 @@ def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_pat
     client.host = "http://127.0.0.1:11434"
     client.timeout_seconds = 120
     client.think = False
-    client.client = StubClient()
+    client.async_client = StubAsyncClient()
     client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
 
     text = client.chat(
@@ -59,3 +60,40 @@ def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_pat
     assert call["promptEvalCount"] == 5
     assert call["evalCount"] == 7
     assert call["message_count"] == 2
+
+
+def test_ollama_chat_client_async_logs_same_contract(tmp_path):
+    class StubAsyncClient:
+        async def chat(self, **_kwargs):
+            return {
+                "message": {"content": "generated text"},
+                "total_duration": 2_000_000_000,
+                "prompt_eval_count": 3,
+                "eval_count": 4,
+            }
+
+    client = object.__new__(OllamaChatClient)
+    client.host = "http://127.0.0.1:11434"
+    client.timeout_seconds = 120
+    client.think = False
+    client.async_client = StubAsyncClient()
+    client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+
+    text = asyncio.run(
+        client.chat_async(
+            task_id="task-1",
+            semantic_task="synthetic_text_generation",
+            model="llama3",
+            system_prompt="system",
+            user_prompt="user",
+            options={"temperature": 0.75},
+            response_format=None,
+        )
+    )
+
+    assert text == "generated text"
+    call = json.loads((tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert call["stream"] is False
+    assert call["ollamaTotalDurationSeconds"] == 2.0
+    assert call["promptEvalCount"] == 3
+    assert call["evalCount"] == 4

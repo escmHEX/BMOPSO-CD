@@ -116,6 +116,13 @@ class RuntimeConfig:
             raise ValueError("experiment.iterations must be non-negative")
         if self.runs <= 0:
             raise ValueError("experiment.runs must be positive")
+        parallelism_enabled = self.get("parallelism.enabled", True)
+        if not isinstance(parallelism_enabled, bool):
+            raise ValueError("parallelism.enabled must be boolean")
+        if int(self.get("parallelism.particle_update_max_concurrent", 10)) <= 0:
+            raise ValueError("parallelism.particle_update_max_concurrent must be positive")
+        if int(self.get("parallelism.initial_text_generation_max_concurrent", 10)) <= 0:
+            raise ValueError("parallelism.initial_text_generation_max_concurrent must be positive")
         if not self.components:
             raise ValueError("semantic_components.order must contain at least one component")
         duplicated = {component for component in self.components if self.components.count(component) > 1}
