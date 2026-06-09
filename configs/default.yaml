@@ -164,7 +164,7 @@ mopso:
   k_retry: 0
   tau_dup: 0.92
   tau_tur_min: 0.6
-  tau_tur_max: 0.85
+  tau_tur_max: 0.9
   utility_weights:
     f1: 0.5
     f2: 0.5
