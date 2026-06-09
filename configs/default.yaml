@@ -14,8 +14,8 @@ runtime:
   eager_load_models: true
 
 parallelism:
-  enabled: true
-  particle_update_max_concurrent: 1
+  enabled: false
+  particle_update_max_concurrent: 10
   initial_text_generation_max_concurrent: 10
 
 checkpoint:
