@@ -172,6 +172,29 @@ def test_mopso_uses_fractional_archive_multiplier(test_config, tmp_path):
     assert engine.archive.max_size == 2
 
 
+def test_generation_metrics_reports_archive_capacity_and_raw_hypervolume(test_config, tmp_path):
+    test_config.set("experiment.n", 4)
+    test_config.set("mopso.archive_multiplier", 0.5)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    engine.archive.solutions = [make_solution(1.0, 2.0, 1)]
+    first = engine._generation_metrics(1, engine.archive.solutions, modified_count=1)
+    engine.archive.solutions = [make_solution(0.0, 1.0, 2)]
+    second = engine._generation_metrics(2, engine.archive.solutions, modified_count=1)
+
+    assert first["archive_size"] == 1
+    assert first["archive_capacity"] == 2
+    assert first["hypervolume"] == 1.0
+    assert second["hypervolume"] == 0.25
+
+
 def test_external_archive_deduplicates_by_normalized_signature():
     archive = ExternalArchive(max_size=4, rng=Random(1))
     first = Solution(

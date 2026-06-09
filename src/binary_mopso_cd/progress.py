@@ -64,9 +64,11 @@ class ProgressLogger:
         modified_count: int,
         population_size: int,
         archive_size: int,
+        archive_capacity: int | None,
         hypervolume: float | None,
         spread: float | None,
     ) -> None:
+        archive_label = f"{archive_size}/{archive_capacity}" if archive_capacity is not None else str(archive_size)
         self.info(
             "run %s/%s | generation %s/%s | modified=%s/%s | archive=%s | hv=%s | spread=%s | elapsed=%s",
             self.run_index,
@@ -75,7 +77,7 @@ class ProgressLogger:
             total_generations,
             modified_count,
             population_size,
-            archive_size,
+            archive_label,
             format_optional_float(hypervolume),
             format_optional_float(spread),
             format_elapsed(time.perf_counter() - self.started),

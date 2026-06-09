@@ -325,6 +325,7 @@ class BinaryMOPSOCDEngine:
                         modified_count,
                         len(population),
                         len(self.archive.solutions),
+                        self.archive.max_size,
                         row["hypervolume"],
                         row["spread"],
                     )
@@ -963,6 +964,7 @@ class BinaryMOPSOCDEngine:
             "mean_f2": float(np.mean(f2)) if f2 else 0.0,
             "max_f2": float(np.max(f2)) if f2 else 0.0,
             "archive_size": len(self.archive.solutions),
+            "archive_capacity": self.archive.max_size,
             "generated_with_central_anchors": sum(
                 1 for solution in population if solution.changed and solution.metadata.get("used_central_anchors") is True
             ),

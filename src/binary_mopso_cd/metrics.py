@@ -52,9 +52,11 @@ def calculate_hypervolume(points: list[tuple[float, float]]) -> float | None:
 
 def calculate_spread(points: list[tuple[float, float]]) -> float | None:
     front = pareto_points(points)
-    if len(front) < 3:
+    if len(front) < 2:
         return None
     distances = [math.dist(front[index - 1], front[index]) for index in range(1, len(front))]
+    if len(distances) == 1:
+        return 0.0
     mean_distance = sum(distances) / len(distances)
     if mean_distance <= 0:
         return 0.0

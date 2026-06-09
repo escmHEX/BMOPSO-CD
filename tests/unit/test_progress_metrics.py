@@ -33,20 +33,33 @@ def test_archive_metrics_normalize_fidelity_and_cosine_distance_diversity():
 
     assert normalized_objective_point(solution(-1.0, 1.5, 1)) == (0.0, 0.75)
     assert metrics["hypervolume"] == 0.25
-    assert metrics["spread"] is None
+    assert metrics["spread"] == 0.0
+
+
+def test_spread_requires_at_least_two_front_points():
+    assert calculate_spread([(0.5, 0.5)]) is None
 
 
 def test_progress_logger_writes_generation_line(test_config, tmp_path):
     test_config.set("logging.console", False)
     logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
 
-    logger.generation(1, 2, modified_count=3, population_size=4, archive_size=5, hypervolume=0.25, spread=None)
+    logger.generation(
+        1,
+        2,
+        modified_count=3,
+        population_size=4,
+        archive_size=5,
+        archive_capacity=8,
+        hypervolume=0.25,
+        spread=None,
+    )
     logger.close()
 
     text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
     assert "generation 1/2" in text
     assert "modified=3/4" in text
-    assert "archive=5" in text
+    assert "archive=5/8" in text
     assert "hv=0.250000" in text
     assert "spread=NA" in text
 
