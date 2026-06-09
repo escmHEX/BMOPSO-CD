@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from binary_mopso_cd.async_utils import run_async, run_limited
 from binary_mopso_cd.checkpoint import CheckpointManager
 from binary_mopso_cd.component_memory import ComponentMemoryIndex
 from binary_mopso_cd.component_specs import component_spec
@@ -30,8 +31,8 @@ from binary_mopso_cd.router import (
     SemanticRouter,
 )
 from binary_mopso_cd.services.embedding import EmbeddingService
-from binary_mopso_cd.settings import CheckpointSettings, ComponentSettings, MOPSOSettings
-from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, word_count
+from binary_mopso_cd.settings import CheckpointSettings, ComponentSettings, MOPSOSettings, ParallelismSettings
+from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, stable_digest, word_count
 
 
 SolutionSignature = tuple[tuple[str, str], ...]
@@ -170,6 +171,28 @@ class PBestUpdater:
         return previous
 
 
+@dataclass(frozen=True, slots=True)
+class ParticleUpdateJob:
+    index: int
+    particle: Solution
+    pbest: Solution
+    leader: Solution
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParticleUpdateResult:
+    index: int
+    solution: Solution
+    error: str | None = None
+    optimization_rejections: tuple[dict[str, Any], ...] = ()
+
+
+def particle_update_seed(base_seed: int, generation: int, index: int) -> int:
+    digest = stable_digest({"seed": base_seed, "generation": generation, "particle_index": index})
+    return int(digest[:16], 16)
+
+
 class BinaryMOPSOCDEngine:
     def __init__(
         self,
@@ -194,6 +217,7 @@ class BinaryMOPSOCDEngine:
         self.progress_logger = progress_logger
         self.components = ComponentSettings.from_config(config)
         self.mopso = MOPSOSettings.from_config(config)
+        self.parallelism = ParallelismSettings.from_config(config)
         self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
         checkpoint = CheckpointSettings.from_config(config)
         self.archive = ExternalArchive(max_size=archive_capacity(config.n, self.mopso.archive_multiplier), rng=rng)
@@ -239,11 +263,7 @@ class BinaryMOPSOCDEngine:
             for generation in range(start_generation + 1, self.config.iterations + 1):
                 if self.progress_logger is not None:
                     self.progress_logger.generation_start(generation, self.config.iterations)
-                next_population = []
-                for index, particle in enumerate(population):
-                    leader = self.archive.select_leader(self.mopso.leader_tournament_size)
-                    updated = self._update_particle(particle, pbest[index], leader, generation)
-                    next_population.append(updated)
+                next_population = self._update_population(population, pbest, generation)
                 modified_count = sum(1 for solution in next_population if solution.changed)
                 comparison_batch = next_population + pbest + self.archive.solutions
                 evaluate_unique_solutions_by_signature(
@@ -290,7 +310,80 @@ class BinaryMOPSOCDEngine:
         self._write_monitor_metrics(monitor_rows)
         return population, self.archive
 
-    def _update_particle(self, particle: Solution, pbest: Solution, leader: Solution, generation: int) -> Solution:
+    def _update_population(self, population: list[Solution], pbest: list[Solution], generation: int) -> list[Solution]:
+        if not self.parallelism.enabled or self.parallelism.particle_update_max_concurrent <= 1:
+            next_population = []
+            for index, particle in enumerate(population):
+                leader = self.archive.select_leader(self.mopso.leader_tournament_size)
+                updated = self._update_particle(particle, pbest[index], leader, generation)
+                next_population.append(updated)
+            return next_population
+        leaders = [self.archive.select_leader(self.mopso.leader_tournament_size) for _particle in population]
+        jobs = [
+            ParticleUpdateJob(
+                index=index,
+                particle=particle.clone(keep_id=True),
+                pbest=pbest[index].clone(),
+                leader=leaders[index].clone(),
+                generation=generation,
+            )
+            for index, particle in enumerate(population)
+        ]
+        results = run_async(
+            run_limited(
+                jobs,
+                self.parallelism.particle_update_max_concurrent,
+                self._update_particle_job_async,
+            )
+        )
+        results.sort(key=lambda result: result.index)
+        self._write_optimization_rejections(
+            [row for result in results for row in result.optimization_rejections]
+        )
+        self._write_particle_update_errors(
+            [
+                {
+                    "phase": "optimization",
+                    "generation": result.solution.generation or generation,
+                    "index": result.index,
+                    "solution_id": result.solution.solution_id,
+                    "error": result.error,
+                }
+                for result in results
+                if result.error is not None
+            ]
+        )
+        return [result.solution for result in results]
+
+    async def _update_particle_job_async(self, job: ParticleUpdateJob) -> ParticleUpdateResult:
+        rng = Random(particle_update_seed(self.config.seed, job.generation, job.index))
+        rejections: list[dict[str, Any]] = []
+        try:
+            solution = await self._update_particle_async(
+                job.particle,
+                job.pbest,
+                job.leader,
+                job.generation,
+                rng=rng,
+                rejection_sink=rejections,
+            )
+            return ParticleUpdateResult(job.index, solution, optimization_rejections=tuple(rejections))
+        except Exception as exc:
+            fallback = job.particle.clone(keep_id=True)
+            fallback.changed = False
+            fallback.generation = job.generation
+            return ParticleUpdateResult(job.index, fallback, error=str(exc), optimization_rejections=tuple(rejections))
+
+    def _update_particle(
+        self,
+        particle: Solution,
+        pbest: Solution,
+        leader: Solution,
+        generation: int,
+        rng: Random | None = None,
+        rejection_sink: list[dict[str, Any]] | None = None,
+    ) -> Solution:
+        rng = rng or self.rng
         updated = particle.clone(keep_id=True)
         updated.changed = False
         active_components = self.components.active
@@ -306,8 +399,8 @@ class BinaryMOPSOCDEngine:
             embeddings = self.executor.embedding_service.encode([current, pbest_value, leader_value], text_type="component")
             delta_p = semantic_velocity_delta(embeddings[0], embeddings[1])
             delta_l = semantic_velocity_delta(embeddings[0], embeddings[2])
-            r1 = self.rng.random()
-            r2 = self.rng.random()
+            r1 = rng.random()
+            r2 = rng.random()
             previous_velocity = float(particle.velocity.get(component, 0.0))
             s_in_velocity = omega * previous_velocity
             s_in_weight = omega * abs(previous_velocity)
@@ -318,22 +411,22 @@ class BinaryMOPSOCDEngine:
             updated.velocity[component] = velocity
             q_pso = abs(math.tanh(self.mopso.alpha * velocity))
             q_eff = 1.0 - (1.0 - q_pso) * (1.0 - p_tur)
-            roll = self.rng.random()
+            roll = rng.random()
             mode = None
             if roll < p_tur:
                 mode = "turbulence"
-            elif self.rng.random() < q_pso:
-                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle)
+            elif rng.random() < q_pso:
+                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, rng)
             if mode:
                 candidates.append((component, mode, q_eff))
         max_changes = min(self.mopso.dmax, len(candidates))
         if len(candidates) > max_changes:
-            candidates = weighted_sample_without_replacement(candidates, max_changes, self.rng)
+            candidates = weighted_sample_without_replacement(candidates, max_changes, rng)
         for component, mode, _weight in candidates:
             effective_mode = self._effective_candidate_mode(component, mode, updated)
             if effective_mode is None:
                 continue
-            replacement = self._candidate_for_mode(component, effective_mode, updated, pbest, leader, generation)
+            replacement = self._candidate_for_mode(component, effective_mode, updated, pbest, leader, generation, rng)
             if replacement:
                 updated.vector.components[component] = replacement
                 updated.changed = True
@@ -344,7 +437,7 @@ class BinaryMOPSOCDEngine:
             updated.velocity[component] = particle.velocity.get(component, 0.0)
         if updated.changed:
             proposed_prompt = self._render_prompt(updated.vector)
-            used_central_anchors, anchor_probability = self._central_anchor_usage(generation)
+            used_central_anchors, anchor_probability = self._central_anchor_usage(generation, rng=rng)
             user_prompt_override = (
                 build_anchored_text_generation_user_prompt(proposed_prompt, self.central_anchors)
                 if used_central_anchors
@@ -362,7 +455,112 @@ class BinaryMOPSOCDEngine:
                     tau_gen_min=self.tau_gen_min,
                 )
             if not validation.valid:
-                self._write_optimization_rejection(
+                rejection = {
+                    "phase": "optimization",
+                    "generation": generation,
+                    "solution_id": particle.solution_id,
+                    "reason": validation.reason,
+                    "f1": f1,
+                    "text": proposed_text,
+                    "used_central_anchors": used_central_anchors,
+                    "anchor_inclusion_probability": anchor_probability,
+                }
+                if rejection_sink is None:
+                    self._write_optimization_rejection(rejection)
+                else:
+                    rejection_sink.append(rejection)
+                restored = particle.clone(keep_id=True)
+                restored.velocity = dict(updated.velocity)
+                restored.changed = False
+                return restored
+            updated.prompt = proposed_prompt
+            updated.generated_text = proposed_text
+            updated.generation = generation
+            updated.metadata["used_central_anchors"] = used_central_anchors
+            updated.metadata["anchor_inclusion_probability"] = anchor_probability
+        return updated
+
+    async def _update_particle_async(
+        self,
+        particle: Solution,
+        pbest: Solution,
+        leader: Solution,
+        generation: int,
+        rng: Random,
+        rejection_sink: list[dict[str, Any]],
+    ) -> Solution:
+        updated = particle.clone(keep_id=True)
+        updated.changed = False
+        active_components = self.components.active
+        candidates: list[tuple[str, str, float]] = []
+        schedule_index = generation - 1
+        rho = progress_ratio(schedule_index, self.config.iterations)
+        omega = self.mopso.omega_max - (self.mopso.omega_max - self.mopso.omega_min) * rho
+        p_tur = self.mopso.p_tur_max - (self.mopso.p_tur_max - self.mopso.p_tur_min) * rho
+        for component in active_components:
+            current = particle.vector.components[component]
+            pbest_value = pbest.vector.components[component]
+            leader_value = leader.vector.components[component]
+            embeddings = self.executor.embedding_service.encode([current, pbest_value, leader_value], text_type="component")
+            delta_p = semantic_velocity_delta(embeddings[0], embeddings[1])
+            delta_l = semantic_velocity_delta(embeddings[0], embeddings[2])
+            r1 = rng.random()
+            r2 = rng.random()
+            previous_velocity = float(particle.velocity.get(component, 0.0))
+            s_in_velocity = omega * previous_velocity
+            s_in_weight = omega * abs(previous_velocity)
+            s_cog = self.mopso.c1 * r1 * delta_p
+            s_soc = self.mopso.c2 * r2 * delta_l
+            raw_velocity = s_in_velocity + s_cog + s_soc
+            velocity = max(-self.mopso.vmax, min(self.mopso.vmax, raw_velocity))
+            updated.velocity[component] = velocity
+            q_pso = abs(math.tanh(self.mopso.alpha * velocity))
+            q_eff = 1.0 - (1.0 - q_pso) * (1.0 - p_tur)
+            roll = rng.random()
+            mode = None
+            if roll < p_tur:
+                mode = "turbulence"
+            elif rng.random() < q_pso:
+                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, rng)
+            if mode:
+                candidates.append((component, mode, q_eff))
+        max_changes = min(self.mopso.dmax, len(candidates))
+        if len(candidates) > max_changes:
+            candidates = weighted_sample_without_replacement(candidates, max_changes, rng)
+        for component, mode, _weight in candidates:
+            effective_mode = self._effective_candidate_mode(component, mode, updated)
+            if effective_mode is None:
+                continue
+            replacement = await self._candidate_for_mode_async(component, effective_mode, updated, pbest, leader, generation, rng)
+            if replacement:
+                updated.vector.components[component] = replacement
+                updated.changed = True
+                if effective_mode in GUIDED_MOVES:
+                    updated.last_guided_move[component] = effective_mode
+        for component in self.components.frozen:
+            updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
+            updated.velocity[component] = particle.velocity.get(component, 0.0)
+        if updated.changed:
+            proposed_prompt = await self._render_prompt_async(updated.vector)
+            used_central_anchors, anchor_probability = self._central_anchor_usage(generation, rng=rng)
+            user_prompt_override = (
+                build_anchored_text_generation_user_prompt(proposed_prompt, self.central_anchors)
+                if used_central_anchors
+                else None
+            )
+            proposed_text = await self._generate_text_async(proposed_prompt, user_prompt_override=user_prompt_override)
+            validation = validate_generated_text(proposed_text, self.reference_text)
+            f1: float | None = None
+            if validation.valid:
+                f1 = self._generated_text_fidelity(proposed_text)
+                validation = validate_generated_text(
+                    proposed_text,
+                    self.reference_text,
+                    f1=f1,
+                    tau_gen_min=self.tau_gen_min,
+                )
+            if not validation.valid:
+                rejection_sink.append(
                     {
                         "phase": "optimization",
                         "generation": generation,
@@ -385,11 +583,11 @@ class BinaryMOPSOCDEngine:
             updated.metadata["anchor_inclusion_probability"] = anchor_probability
         return updated
 
-    def _central_anchor_usage(self, generation: int) -> tuple[bool, float | None]:
+    def _central_anchor_usage(self, generation: int, rng: Random | None = None) -> tuple[bool, float | None]:
         if not self.mopso.p_anchor_enabled or not self.central_anchors:
             return False, None
         probability = self._anchor_inclusion_probability(generation)
-        return self.rng.random() < probability, probability
+        return (rng or self.rng).random() < probability, probability
 
     def _anchor_inclusion_probability(self, generation: int) -> float:
         rho = progress_ratio(generation - 1, self.config.iterations)
@@ -402,7 +600,9 @@ class BinaryMOPSOCDEngine:
         cognitive_weight: float,
         social_weight: float,
         particle: Solution,
+        rng: Random | None = None,
     ) -> str | None:
+        rng = rng or self.rng
         weights = {
             "inertia": inertia_weight if self._last_guided_move(component, particle) is not None else 0.0,
             "cognitive": cognitive_weight,
@@ -411,7 +611,7 @@ class BinaryMOPSOCDEngine:
         total = sum(weights.values())
         if total <= 0:
             return None
-        roll = self.rng.random() * total
+        roll = rng.random() * total
         cumulative = 0.0
         for name, weight in weights.items():
             cumulative += weight
@@ -427,13 +627,14 @@ class BinaryMOPSOCDEngine:
         pbest: Solution,
         leader: Solution,
         generation: int,
+        rng: Random | None = None,
     ) -> str | None:
         current = particle.vector.components[component]
         effective_mode = self._effective_candidate_mode(component, mode, particle)
         if effective_mode is None:
             return None
         if effective_mode == "turbulence":
-            return self._turbulence_candidate(component, current)
+            return self._turbulence_candidate(component, current, rng=rng)
         target = pbest.vector.components[component] if effective_mode == "cognitive" else leader.vector.components[component]
         route = RouteTask(
             uuid4().hex,
@@ -442,6 +643,36 @@ class BinaryMOPSOCDEngine:
             self._influence_task_params(component, current, target, particle, generation),
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
+        return self._select_guided_candidate(component, current, target, raw_candidates)
+
+    async def _candidate_for_mode_async(
+        self,
+        component: str,
+        mode: str,
+        particle: Solution,
+        pbest: Solution,
+        leader: Solution,
+        generation: int,
+        rng: Random,
+    ) -> str | None:
+        current = particle.vector.components[component]
+        effective_mode = self._effective_candidate_mode(component, mode, particle)
+        if effective_mode is None:
+            return None
+        if effective_mode == "turbulence":
+            return self._turbulence_candidate(component, current, rng=rng)
+        target = pbest.vector.components[component] if effective_mode == "cognitive" else leader.vector.components[component]
+        route = RouteTask(
+            uuid4().hex,
+            "optimization",
+            TASK_INFLUENCE,
+            self._influence_task_params(component, current, target, particle, generation),
+        )
+        routed = self.router.route(route)
+        if hasattr(self.executor, "execute_async"):
+            raw_candidates = list(await self.executor.execute_async(routed))
+        else:
+            raw_candidates = list(self.executor.execute(routed))
         return self._select_guided_candidate(component, current, target, raw_candidates)
 
     def _effective_candidate_mode(self, component: str, mode: str, particle: Solution) -> str | None:
@@ -488,12 +719,13 @@ class BinaryMOPSOCDEngine:
             "iterations": self.config.iterations,
         }
 
-    def _turbulence_candidate(self, component: str, current: str) -> str | None:
+    def _turbulence_candidate(self, component: str, current: str, rng: Random | None = None) -> str | None:
+        rng = rng or self.rng
         spec = component_spec(component)
         units = self.executor.turbulence_provider.modifiable_units(current, spec.preferred_turbulence_pos)
         if not units:
             return None
-        selected = self.rng.choice(units)
+        selected = rng.choice(units)
         route = RouteTask(
             uuid4().hex,
             "optimization",
@@ -592,6 +824,18 @@ class BinaryMOPSOCDEngine:
         )
         return str(self.executor.execute(self.router.route(route)))
 
+    async def _render_prompt_async(self, vector: SemanticVector) -> str:
+        route = RouteTask(
+            uuid4().hex,
+            "optimization",
+            TASK_PROMPT_RENDERING,
+            {"components": vector.components, "domain": self.config.get("experiment.domain")},
+        )
+        routed = self.router.route(route)
+        if hasattr(self.executor, "execute_async"):
+            return str(await self.executor.execute_async(routed))
+        return str(self.executor.execute(routed))
+
     def _generate_text(self, prompt: str, user_prompt_override: str | None = None) -> str:
         task_params: dict[str, Any] = {"prompt": prompt, "reference_text": self.reference_text}
         if user_prompt_override is not None:
@@ -604,14 +848,43 @@ class BinaryMOPSOCDEngine:
         )
         return str(self.executor.execute(self.router.route(route))).strip()
 
+    async def _generate_text_async(self, prompt: str, user_prompt_override: str | None = None) -> str:
+        task_params: dict[str, Any] = {"prompt": prompt, "reference_text": self.reference_text}
+        if user_prompt_override is not None:
+            task_params["userPromptOverride"] = user_prompt_override
+        route = RouteTask(
+            uuid4().hex,
+            "optimization",
+            TASK_SYNTHETIC_TEXT,
+            task_params,
+        )
+        routed = self.router.route(route)
+        if hasattr(self.executor, "execute_async"):
+            return str(await self.executor.execute_async(routed)).strip()
+        return str(self.executor.execute(routed)).strip()
+
     def _generated_text_fidelity(self, text: str) -> float:
         scores = semantic_fidelity_scores([text], self.reference_text, self.executor.embedding_service)
         return float(scores[0]) if scores.size else 0.0
 
     def _write_optimization_rejection(self, row: dict[str, Any]) -> None:
+        self._write_optimization_rejections([row])
+
+    def _write_optimization_rejections(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
         path = self.outdir / "optimization_rejections.jsonl"
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _write_particle_update_errors(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        path = self.outdir / "particle_update_errors.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _generation_metrics(self, generation: int, population: list[Solution], modified_count: int) -> dict[str, Any]:
         f1 = [solution.objectives.f1 for solution in population if solution.objectives]

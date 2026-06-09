@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from binary_mopso_cd.executor import SemanticTaskExecutor
@@ -28,3 +29,33 @@ def test_executor_ollama_contract_is_single_shot_stream_false(test_config, tmp_p
     assert call["message_count"] == 2
     assert call["stream"] is False
     assert call["options"]["temperature"] == 0.75
+
+
+def test_executor_async_llm_matches_sync_task_contract(test_config, tmp_path):
+    class StubLLMClient:
+        def __init__(self):
+            self.kwargs = None
+
+        async def chat_async(self, **kwargs):
+            self.kwargs = kwargs
+            return "async generated text"
+
+    router = SemanticRouter(test_config)
+    llm_client = StubLLMClient()
+    executor = SemanticTaskExecutor(test_config, outdir=tmp_path, llm_client=llm_client)
+    task = RouteTask(
+        "x",
+        "test",
+        TASK_SYNTHETIC_TEXT,
+        {
+            "prompt": "Generate a short social media message related to crises and emergencies.",
+            "reference_text": "Evacuation order",
+        },
+    )
+
+    result = asyncio.run(executor.execute_async(router.route(task)))
+
+    assert result == "async generated text"
+    assert llm_client.kwargs["semantic_task"] == TASK_SYNTHETIC_TEXT
+    assert llm_client.kwargs["options"]["temperature"] == 0.75
+    assert llm_client.kwargs["response_format"] is None

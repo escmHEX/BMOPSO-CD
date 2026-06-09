@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from pathlib import Path
@@ -82,6 +83,35 @@ class OllamaChatClient:
         self.client = Client(host=host, timeout=timeout_seconds)
         self.logger = logger or LLMCallLogger(None)
 
+    def _log_call(
+        self,
+        *,
+        task_id: str,
+        semantic_task: str,
+        model: str,
+        options: dict[str, Any],
+        response_format: Any,
+        message_count: int,
+        elapsed: float,
+        content: str,
+        response: Any,
+    ) -> None:
+        self.logger.log(
+            {
+                "task_id": task_id,
+                "semantic_task": semantic_task,
+                "model": model,
+                "options": options,
+                "stream": False,
+                "think": self.think,
+                "format": "plain" if response_format is None else "structured",
+                "message_count": message_count,
+                "elapsed_seconds": elapsed,
+                "content_chars": len(str(content)),
+                **ollama_usage_metadata(response),
+            }
+        )
+
     def chat(
         self,
         *,
@@ -108,20 +138,69 @@ class OllamaChatClient:
         )
         elapsed = time.perf_counter() - started
         content = response_message_content(response)
-        self.logger.log(
-            {
-                "task_id": task_id,
-                "semantic_task": semantic_task,
-                "model": model,
-                "options": options,
-                "stream": False,
-                "think": self.think,
-                "format": "plain" if response_format is None else "structured",
-                "message_count": len(messages),
-                "elapsed_seconds": elapsed,
-                "content_chars": len(str(content)),
-                **ollama_usage_metadata(response),
-            }
+        self._log_call(
+            task_id=task_id,
+            semantic_task=semantic_task,
+            model=model,
+            options=options,
+            response_format=response_format,
+            message_count=len(messages),
+            elapsed=elapsed,
+            content=content,
+            response=response,
+        )
+        text = str(content).strip()
+        if not text:
+            raise RuntimeError(
+                f"Ollama returned empty content for semantic task {semantic_task!r} with model {model!r}. "
+                "Check model configuration and Ollama thinking settings."
+            )
+        return text
+
+    async def chat_async(
+        self,
+        *,
+        task_id: str,
+        semantic_task: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        options: dict[str, Any],
+        response_format: Any,
+    ) -> str:
+        from ollama import AsyncClient
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        async_client = AsyncClient(host=self.host, timeout=self.timeout_seconds)
+        try:
+            started = time.perf_counter()
+            response = await async_client.chat(
+                model=model,
+                messages=messages,
+                options=options,
+                stream=False,
+                think=self.think,
+                format=response_format,
+            )
+            elapsed = time.perf_counter() - started
+        finally:
+            close_result = async_client.close()
+            if inspect.isawaitable(close_result):
+                await close_result
+        content = response_message_content(response)
+        self._log_call(
+            task_id=task_id,
+            semantic_task=semantic_task,
+            model=model,
+            options=options,
+            response_format=response_format,
+            message_count=len(messages),
+            elapsed=elapsed,
+            content=content,
+            response=response,
         )
         text = str(content).strip()
         if not text:

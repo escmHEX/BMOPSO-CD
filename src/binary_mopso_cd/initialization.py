@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from binary_mopso_cd.async_utils import run_async, run_limited
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.executor import SemanticTaskExecutor
@@ -24,7 +25,7 @@ from binary_mopso_cd.router import (
     RouteTask,
     SemanticRouter,
 )
-from binary_mopso_cd.settings import ComponentSettings, InitializationSettings
+from binary_mopso_cd.settings import ComponentSettings, InitializationSettings, ParallelismSettings
 from binary_mopso_cd.utils import canonical_text, unique_preserve_order, word_count
 
 
@@ -42,6 +43,16 @@ class InitialPopulationResult:
     semantic_anchors: dict[str, list[str]]
 
 
+@dataclass(frozen=True)
+class InitialTextGenerationResult:
+    index: int
+    vector: SemanticVector
+    prompt: str
+    diversity_score: float
+    text: str | None = None
+    error: str | None = None
+
+
 class InitialPopulationBuilder:
     def __init__(self, config: RuntimeConfig, router: SemanticRouter, executor: SemanticTaskExecutor, rng: Random):
         self.config = config
@@ -50,6 +61,7 @@ class InitialPopulationBuilder:
         self.rng = rng
         self.components = ComponentSettings.from_config(config)
         self.settings = InitializationSettings.from_config(config)
+        self.parallelism = ParallelismSettings.from_config(config)
         self.tau_gen_min = float(config.get("generated_text_validation.tau_gen_min", 0.05))
 
     def build(self, reference_text: str) -> list[Solution]:
@@ -258,23 +270,28 @@ class InitialPopulationBuilder:
         candidates: list[tuple[int, SemanticVector, str, float, str]] = []
         accepted: list[Solution] = []
         rejections: list[dict[str, Any]] = []
-        for index, (vector, prompt, diversity_score) in enumerate(items):
-            route = RouteTask(
-                uuid4().hex,
-                "initialization",
-                TASK_SYNTHETIC_TEXT,
-                {"prompt": prompt, "reference_text": reference_text},
-            )
-            text = str(self.executor.execute(self.router.route(route))).strip()
+        generated_items = self._generate_text_candidates(items, reference_text)
+        for generated in generated_items:
+            if generated.error is not None:
+                rejections.append(
+                    self._rejection_row(
+                        "text_generation_failed",
+                        "",
+                        index=generated.index,
+                        error=generated.error,
+                    )
+                )
+                continue
+            text = str(generated.text or "").strip()
             validation = validate_generated_text(
                 text,
                 reference_text,
                 max_sentences=self.settings.generated_sentences_max,
             )
             if not validation.valid:
-                rejections.append(self._rejection_row(validation.reason, text, index=index))
+                rejections.append(self._rejection_row(validation.reason, text, index=generated.index))
                 continue
-            candidates.append((index, vector, prompt, diversity_score, text))
+            candidates.append((generated.index, generated.vector, generated.prompt, generated.diversity_score, text))
 
         if candidates:
             f1_values = semantic_fidelity_scores(
@@ -322,6 +339,62 @@ class InitialPopulationBuilder:
         if rejections:
             self._write_rejections(rejections)
         return accepted
+
+    def _generate_text_candidates(
+        self,
+        items: list[tuple[SemanticVector, str, float]],
+        reference_text: str,
+    ) -> list[InitialTextGenerationResult]:
+        indexed = list(enumerate(items))
+        if self.parallelism.enabled and self.parallelism.initial_text_generation_max_concurrent > 1:
+            return run_async(
+                run_limited(
+                    indexed,
+                    self.parallelism.initial_text_generation_max_concurrent,
+                    lambda item: self._generate_text_candidate_async(item, reference_text),
+                )
+            )
+        return [self._generate_text_candidate(item, reference_text) for item in indexed]
+
+    def _generate_text_candidate(
+        self,
+        item: tuple[int, tuple[SemanticVector, str, float]],
+        reference_text: str,
+    ) -> InitialTextGenerationResult:
+        index, (vector, prompt, diversity_score) = item
+        try:
+            route = RouteTask(
+                uuid4().hex,
+                "initialization",
+                TASK_SYNTHETIC_TEXT,
+                {"prompt": prompt, "reference_text": reference_text},
+            )
+            text = str(self.executor.execute(self.router.route(route))).strip()
+            return InitialTextGenerationResult(index, vector, prompt, diversity_score, text=text)
+        except Exception as exc:
+            return InitialTextGenerationResult(index, vector, prompt, diversity_score, error=str(exc))
+
+    async def _generate_text_candidate_async(
+        self,
+        item: tuple[int, tuple[SemanticVector, str, float]],
+        reference_text: str,
+    ) -> InitialTextGenerationResult:
+        index, (vector, prompt, diversity_score) = item
+        try:
+            route = RouteTask(
+                uuid4().hex,
+                "initialization",
+                TASK_SYNTHETIC_TEXT,
+                {"prompt": prompt, "reference_text": reference_text},
+            )
+            routed = self.router.route(route)
+            if hasattr(self.executor, "execute_async"):
+                text = str(await self.executor.execute_async(routed)).strip()
+            else:
+                text = str(self.executor.execute(routed)).strip()
+            return InitialTextGenerationResult(index, vector, prompt, diversity_score, text=text)
+        except Exception as exc:
+            return InitialTextGenerationResult(index, vector, prompt, diversity_score, error=str(exc))
 
     def _rejection_row(self, reason: str | None, text: str, **metadata: Any) -> dict[str, Any]:
         row = {

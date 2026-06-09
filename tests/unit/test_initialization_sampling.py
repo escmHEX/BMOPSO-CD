@@ -87,6 +87,35 @@ class TextRecordingExecutor:
         return self.texts.pop(0)
 
 
+class AsyncTextRecordingExecutor:
+    def __init__(self, texts_by_prompt: dict[str, str], failures: set[str] | None = None):
+        self.tasks = []
+        self.texts_by_prompt = dict(texts_by_prompt)
+        self.failures = set(failures or set())
+        self.embedding_service = ConstantEmbeddingService()
+        self.outdir = None
+        self.active = 0
+        self.max_active = 0
+
+    async def execute_async(self, task):
+        import asyncio
+
+        self.tasks.append(task)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.01 if task.task_params["prompt"].endswith("one") else 0.0)
+            prompt = task.task_params["prompt"]
+            if prompt in self.failures:
+                raise RuntimeError(f"failed prompt: {prompt}")
+            return self.texts_by_prompt[prompt]
+        finally:
+            self.active -= 1
+
+    def execute(self, task):
+        raise AssertionError("sync execute should not be used")
+
+
 def test_build_pool_passes_strategy_component_context(test_config):
     executor = RecordingExecutor()
     builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
@@ -159,3 +188,56 @@ def test_generate_texts_uses_base_prompt_without_central_anchors(test_config):
     assert all("centralAnchors" not in task.task_params for task in synthetic_tasks)
     assert all("userPromptOverride" not in task.task_params for task in synthetic_tasks)
     assert all(solution.metadata["used_central_anchors"] is False for solution in generated)
+
+
+def test_generate_texts_parallel_preserves_order_and_concurrency_limit(test_config):
+    test_config.set("experiment.n", 3)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 2)
+    executor = AsyncTextRecordingExecutor(
+        {
+            "prompt one": "first generated text.",
+            "prompt two": "second generated text.",
+            "prompt three": "third generated text.",
+        }
+    )
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+    items = [
+        (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
+        (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
+        (SemanticVector({"role": "role three", "topic": "topic three", "action": "action three"}), "prompt three", 0.1),
+    ]
+
+    generated = builder._generate_texts(items, "reference text")
+
+    assert [solution.generated_text for solution in generated] == [
+        "first generated text.",
+        "second generated text.",
+        "third generated text.",
+    ]
+    assert executor.max_active == 2
+
+
+def test_generate_texts_parallel_records_generation_failures(test_config, tmp_path):
+    test_config.set("experiment.n", 2)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 2)
+    executor = AsyncTextRecordingExecutor(
+        {
+            "prompt one": "first generated text.",
+            "prompt three": "third generated text.",
+        },
+        failures={"prompt two"},
+    )
+    executor.outdir = tmp_path
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+    items = [
+        (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
+        (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
+        (SemanticVector({"role": "role three", "topic": "topic three", "action": "action three"}), "prompt three", 0.1),
+    ]
+
+    generated = builder._generate_texts(items, "reference text")
+
+    assert len(generated) == 2
+    rejection_log = (tmp_path / "initialization_rejections.jsonl").read_text(encoding="utf-8")
+    assert "text_generation_failed" in rejection_log
+    assert "failed prompt: prompt two" in rejection_log

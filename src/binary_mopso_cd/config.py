@@ -178,6 +178,15 @@ class RuntimeConfig:
             raise ValueError("mopso.tau_tur_min must not exceed mopso.tau_tur_max")
         if int(self.get("mopso.k_retry", 0)) != 0:
             raise ValueError("mopso.k_retry must remain 0 for the specified strategy")
+        parallelism_enabled = self.get("parallelism.enabled", True)
+        if not isinstance(parallelism_enabled, bool):
+            raise ValueError("parallelism.enabled must be boolean")
+        for path in [
+            "parallelism.particle_update_max_concurrent",
+            "parallelism.initial_text_generation_max_concurrent",
+        ]:
+            if int(self.get(path, 10)) <= 0:
+                raise ValueError(f"{path} must be positive")
         tau_gen_min = float(self.get("generated_text_validation.tau_gen_min", 0.05))
         if tau_gen_min < -1.0 or tau_gen_min > 1.0:
             raise ValueError("generated_text_validation.tau_gen_min must be in [-1, 1]")

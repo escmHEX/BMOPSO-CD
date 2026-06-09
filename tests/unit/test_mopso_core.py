@@ -10,10 +10,12 @@ from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.mopso import (
     BinaryMOPSOCDEngine,
     ExternalArchive,
+    ParticleUpdateResult,
     archive_capacity,
     crowding_distance,
     dominates,
     evaluate_unique_solutions_by_signature,
+    particle_update_seed,
     utility,
 )
 from binary_mopso_cd.router import TASK_SYNTHETIC_TEXT
@@ -154,6 +156,47 @@ def test_mopso_uses_fractional_archive_multiplier(test_config, tmp_path):
     )
 
     assert engine.archive.max_size == 2
+
+
+def test_particle_update_seed_is_deterministic_and_particle_specific():
+    assert particle_update_seed(7, 3, 1) == particle_update_seed(7, 3, 1)
+    assert particle_update_seed(7, 3, 1) != particle_update_seed(7, 3, 2)
+
+
+def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_config, tmp_path):
+    test_config.set("experiment.n", 2)
+    test_config.set("parallelism.enabled", True)
+    test_config.set("parallelism.particle_update_max_concurrent", 2)
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    leader = make_solution(0.5, 0.5, 99)
+    engine.archive.solutions = [leader]
+    population = [make_solution(0.1, 0.1, 1), make_solution(0.2, 0.2, 2)]
+    pbest = [solution.clone() for solution in population]
+
+    async def synthetic_update(job):
+        import asyncio
+
+        await asyncio.sleep(0.01 if job.index == 0 else 0.0)
+        solution = job.particle.clone(keep_id=True)
+        solution.generated_text = f"updated {job.index}"
+        if job.index == 1:
+            return ParticleUpdateResult(job.index, solution, error="worker failed")
+        return ParticleUpdateResult(job.index, solution)
+
+    engine._update_particle_job_async = synthetic_update
+
+    updated = engine._update_population(population, pbest, generation=1)
+
+    assert [solution.generated_text for solution in updated] == ["updated 0", "updated 1"]
+    error_log = (tmp_path / "particle_update_errors.jsonl").read_text(encoding="utf-8")
+    assert "worker failed" in error_log
 
 
 def test_external_archive_deduplicates_by_normalized_signature():
@@ -328,7 +371,7 @@ def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_confi
     )
 
     assert engine._anchor_inclusion_probability(1) == pytest.approx(0.05)
-    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.70)
+    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.50)
 
 
 def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_config, tmp_path):
