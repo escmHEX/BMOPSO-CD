@@ -89,16 +89,6 @@ def unique_preserve_order(values: Iterable[str]) -> list[str]:
     return result
 
 
-def parse_bool_assignment(value: str) -> tuple[str, bool]:
-    if "=" not in value:
-        raise ValueError(f"Expected name=true|false assignment, got {value!r}")
-    name, raw = value.split("=", 1)
-    normalized = raw.strip().lower()
-    if normalized not in {"true", "false"}:
-        raise ValueError(f"Expected boolean true|false for {name!r}")
-    return name.strip(), normalized == "true"
-
-
 def safe_float(value: Any, default: float = 0.0) -> float:
     try:
         number = float(value)

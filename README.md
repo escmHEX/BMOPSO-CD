@@ -33,32 +33,55 @@ The default PPDB source is:
 data/ppdb/ppdb-2.0-s-all
 ```
 
-Use `--ppdb-source` or `--ppdb-index` if your paths differ. The raw PPDB file and
-the generated SQLite index are not tracked by Git.
+Use `--set models.ppdb.source_path=...` or `--set models.ppdb.index_path=...`
+if your paths differ. The raw PPDB file and the generated SQLite index are not
+tracked by Git.
 
 ## Run
 
 ```powershell
-.\.venv\Scripts\python -m binary_mopso_cd --reference-text "Evacuation orders remain in effect for Zone A until further notice." --n 100 --iterations 100
+.\.venv\Scripts\python -m binary_mopso_cd `
+  --reference-text "Evacuation orders remain in effect for Zone A until further notice."
 ```
 
-Useful flags:
+Use `--config` to load an additional YAML file on top of `configs/default.yaml`:
 
-```text
---runs 3
---model llama3.1:8b
---bert-model all-MiniLM-L6-v2
---outdir-base exec
---freeze-components role,topic
---enable-monitor
---disable-selection
---router-heuristic semantic_pool_generation=false
---task-model synthetic_text_generation=qwen3.5:2b
---ppdb-source data/ppdb/ppdb-2.0-s-all
---ppdb-index .venv/var/binary_mopso_cd/ppdb_index.sqlite
---enable-checkpoint
---checkpoint-every 1
---resume-from exec/<run>/checkpoints/generation_0001.json
+```powershell
+.\.venv\Scripts\python -m binary_mopso_cd `
+  --reference-text "Evacuation orders remain in effect for Zone A until further notice." `
+  --config configs/default.yaml
+```
+
+Every configurable value from the effective YAML can be overridden with repeated
+`--set path.to.value=value` arguments. Values are parsed as YAML, so booleans,
+numbers and lists keep their real types:
+
+```powershell
+.\.venv\Scripts\python -m binary_mopso_cd `
+  --reference-text "Evacuation orders remain in effect for Zone A until further notice." `
+  --set experiment.n=100 `
+  --set experiment.iterations=100 `
+  --set experiment.runs=3 `
+  --set runtime.outdir_base=exec `
+  --set mopso.archive_multiplier=0.5 `
+  --set parallelism.enabled=true
+```
+
+More examples:
+
+```powershell
+--set ollama.default_model=llama3.1:8b
+--set router.task_models.synthetic_text_generation=qwen3.5:2b
+--set router.heuristics.semantic_pool_generation=false
+--set models.sbert.default=all-MiniLM-L6-v2
+--set models.ppdb.source_path=data/ppdb/ppdb-2.0-s-all
+--set models.ppdb.index_path=.venv/var/binary_mopso_cd/ppdb_index.sqlite
+--set experiment.frozen_components='["role","topic"]'
+--set monitor.enabled=true
+--set selection.enabled=false
+--set checkpoint.enabled=true
+--set checkpoint.interval=1
+--set runtime.resume_from=exec/<run>/checkpoints/generation_0001.json
 ```
 
 Speculative decoding is intentionally not supported in this version. The config
@@ -87,6 +110,9 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 - `checkpoints/generation_*.json` when checkpointing is enabled
 
 These generated artifacts are ignored by Git.
+
+`config_effective.yaml` stores the final resolved configuration after `default.yaml`,
+`--config` and all `--set` overrides have been applied.
 
 ## Tests
 

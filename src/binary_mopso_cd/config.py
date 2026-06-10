@@ -50,12 +50,27 @@ class RuntimeConfig:
             current = current[part]
         return current
 
+    def has_path(self, path: str) -> bool:
+        if not path or any(not part for part in path.split(".")):
+            return False
+        current: Any = self.data
+        for part in path.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return False
+            current = current[part]
+        return True
+
     def set(self, path: str, value: Any) -> None:
         parts = path.split(".")
         current = self.data
         for part in parts[:-1]:
             current = current.setdefault(part, {})
         current[parts[-1]] = value
+
+    def set_existing(self, path: str, value: Any) -> None:
+        if not self.has_path(path):
+            raise ValueError(f"Unknown configuration path: {path}")
+        self.set(path, value)
 
     def as_dict(self) -> dict[str, Any]:
         return deepcopy(self.data)
