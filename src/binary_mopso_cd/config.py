@@ -146,13 +146,11 @@ class RuntimeConfig:
         unknown = self.frozen_components.difference(self.components)
         if unknown:
             raise ValueError(f"Frozen components are not defined components: {sorted(unknown)}")
-        if len(self.frozen_components) >= len(self.components):
-            raise ValueError("At least one component must remain active")
         active_count = len(self.components) - len(self.frozen_components)
         dmax = int(self.get("mopso.dmax", 1))
         if dmax <= 0:
             raise ValueError("mopso.dmax must be positive")
-        if dmax > active_count:
+        if active_count > 0 and dmax > active_count:
             raise ValueError("mopso.dmax must not exceed the number of active components")
         if int(self.get("mopso.kcand", 7)) <= 0:
             raise ValueError("mopso.kcand must be positive")

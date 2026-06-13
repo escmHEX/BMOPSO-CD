@@ -89,6 +89,18 @@ def test_anchor_enabled_must_be_boolean(test_config):
         test_config.validate()
 
 
+def test_all_components_can_be_frozen(test_config):
+    test_config.set("experiment.frozen_components", ["role", "topic", "action"])
+    test_config.validate()
+
+
+def test_dmax_must_not_exceed_active_components_when_any_remain(test_config):
+    test_config.set("experiment.frozen_components", ["role", "topic"])
+    test_config.set("mopso.dmax", 2)
+    with pytest.raises(ValueError, match="dmax"):
+        test_config.validate()
+
+
 def test_archive_multiplier_accepts_fractional_positive_values(test_config):
     test_config.set("mopso.archive_multiplier", 0.25)
     test_config.validate()

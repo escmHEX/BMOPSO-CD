@@ -259,6 +259,13 @@ class BinaryMOPSOCDEngine:
             self.component_memory.add_solutions(population)
         metrics_rows: list[dict[str, Any]] = []
         monitor_rows: list[dict[str, Any]] = []
+        if not self.components.active:
+            try:
+                self._write_metrics(metrics_rows)
+                self._write_monitor_metrics(monitor_rows)
+                return population, self.archive
+            finally:
+                self.checkpoints.close()
         try:
             for generation in range(start_generation + 1, self.config.iterations + 1):
                 if self.progress_logger is not None:

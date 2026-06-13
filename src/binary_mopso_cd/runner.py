@@ -172,4 +172,9 @@ class ExperimentRunner:
             return json.load(handle)
 
     def _should_select_central_anchors(self, config: RuntimeConfig, start_generation: int) -> bool:
-        return config.get("mopso.p_anchor_enabled", False) is True and start_generation < config.iterations
+        active_components = set(config.components).difference(config.frozen_components)
+        return (
+            config.get("mopso.p_anchor_enabled", False) is True
+            and start_generation < config.iterations
+            and bool(active_components)
+        )

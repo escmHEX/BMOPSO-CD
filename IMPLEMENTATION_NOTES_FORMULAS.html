@@ -334,7 +334,7 @@
   <section class="section mopso">
     <h3>MOPSO - Actualizacion discreta binarizada</h3>
     <div class="formula-grid">
-      <div class="formula-card"><h4>Componentes activas</h4><div class="math">\[\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen},\qquad F=\lvert\mathcal{D}_{frozen}\rvert,\qquad 0\le F\le D-1\]</div></div>
+      <div class="formula-card"><h4>Componentes activas</h4><div class="math">\[\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen},\qquad F=\lvert\mathcal{D}_{frozen}\rvert,\qquad 0\le F\le D\]</div><p>Si \(F=D\), MOPSO devuelve la poblacion inicial evaluada y el archivo inicial sin actualizaciones generacionales.</p></div>
       <div class="formula-card"><h4>Distancia semantica en velocidad</h4><div class="math">\[\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\]</div><p class="status-ok">OK: coincide con la estrategia MOPSO-CD.</p></div>
       <div class="formula-card"><h4>Inercia decreciente</h4><div class="math">\[\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\]</div></div>
       <div class="formula-card"><h4>Turbulencia decreciente</h4><div class="math">\[p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\]</div></div>
@@ -456,7 +456,7 @@
       <tr class="exec"><td>EXEC</td><td>Validacion texto generado</td><td>\(\tau_{gen}^{min}\)</td><td>0.05</td><td><code>generated_text_validation.tau_gen_min</code></td><td>Filtro de factibilidad.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Archivo</td><td>\(A_{max}/N\)</td><td>2</td><td><code>mopso.archive_multiplier</code></td><td>\(A_{max}=2N\).</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Torneo lider</td><td>\(q\)</td><td>3</td><td><code>mopso.leader_tournament_size</code></td><td>Lider por CD.</td><td class="status-ok">OK</td></tr>
-      <tr class="mopso"><td>MOPSO</td><td>Cambios maximos</td><td>\(D_{max}\)</td><td>1</td><td><code>mopso.dmax</code></td><td>Componentes por particula/generacion.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Cambios maximos</td><td>\(D_{max}\)</td><td>1</td><td><code>mopso.dmax</code></td><td>Componentes activas por particula/generacion cuando hay activas.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Candidatos</td><td>\(K_{cand}\)</td><td>7</td><td><code>mopso.kcand</code></td><td>Variantes por operador.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Inercia</td><td>\(\omega_{max},\omega_{min}\)</td><td>0.9, 0.4</td><td><code>mopso.omega_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Cognitivo/social</td><td>\(c_1,c_2\)</td><td>1.5, 1.5</td><td><code>mopso.c1</code>, <code>mopso.c2</code></td><td>Velocidad.</td><td class="status-ok">OK</td></tr>

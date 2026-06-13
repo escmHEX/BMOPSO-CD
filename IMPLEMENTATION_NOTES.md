@@ -127,7 +127,7 @@ hyperparameter rows.
 | `OBJ` | Vectorized distance matrix | \(D_{ij}=1-S_{ij}\), where \(S=ZZ^\top\) for normalized embeddings \(Z\), and \(D_{ii}=0\). | `semantic_diversity_scores`; no repeated text-by-text embedding calls. | OK |
 | `OBJ` | MOPSO evaluation set | \(S_t=\operatorname{unique}(P_{t+1}\cup PB_t\cup A_t)\), using `signature(x)` from normalized semantic components and keeping the first occurrence. | `evaluate_unique_solutions_by_signature`; same identity as `ExternalArchive.update`. | OK |
 | `OBJ` | Embedding cache key | \(key=\operatorname{SHA256}(\{type,model,version,canonical(text)\})\). | `EmbeddingCacheKey.to_digest`; `models.sbert.config_version`. | OK |
-| `MOPSO` | Active components | \(\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen}\), \(F=\lvert\mathcal{D}_{frozen}\rvert\), \(0\le F\le D-1\). | `MOPSOOptimizer.active_components`; `experiment.frozen_components`. | OK |
+| `MOPSO` | Active components | \(\mathcal{D}_{active}=\mathcal{D}\setminus\mathcal{D}_{frozen}\), \(F=\lvert\mathcal{D}_{frozen}\rvert\), \(0\le F\le D\). If \(F=D\), MOPSO returns the evaluated initial population and initial archive without generation updates. | `MOPSOOptimizer.active_components`; `experiment.frozen_components`. | OK |
 | `MOPSO` | Semantic distance in velocity | \(\Delta(a,b)=\frac{1-\operatorname{SimCos}(E(a),E(b))}{2}\). | `semantic_velocity_delta`; used by `mopso._update_particle` for `delta_p` and `delta_l`. | OK |
 | `MOPSO` | Inertia schedule | \(\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\). Defaults: \(\omega_{max}=0.9,\omega_{min}=0.4\). | `mopso._update_particle`; `mopso.omega_max`, `mopso.omega_min`. | OK |
 | `MOPSO` | Turbulence schedule | \(p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\). Defaults: \(0.07\to0.02\). | `mopso._update_particle`; `mopso.p_tur_max`, `mopso.p_tur_min`. | OK |
@@ -136,7 +136,7 @@ hyperparameter rows.
 | `MOPSO` | Velocity clamp | \(\hat v_{i,d}^{t+1}=\min(V_{max},\max(-V_{max},v_{raw}))\). | `mopso._update_particle`; `mopso.vmax`. | OK |
 | `MOPSO` | V-shaped transfer | \(q_{pso,i,d}^{t}=T_\alpha(\hat v)=\lvert\tanh(\alpha\hat v)\rvert\). | `math.tanh`; `mopso.alpha=1`. | OK |
 | `MOPSO` | Effective candidate probability | \(q_{eff}=1-(1-q_{pso})(1-p_{tur})\). | `mopso._update_particle`; turbulence checked first, guided move second. | OK |
-| `MOPSO` | Per-generation change cap | \(\lvert M_i^t\rvert\le D_{max}\le\lvert\mathcal{D}_{active}\rvert\). | Candidate list is truncated by weighted sampling; frozen components are skipped. | OK |
+| `MOPSO` | Per-generation change cap | \(\lvert M_i^t\rvert\le D_{max}\le\lvert\mathcal{D}_{active}\rvert\) when \(\lvert\mathcal{D}_{active}\rvert>0\). | Candidate list is truncated by weighted sampling; frozen components are skipped. | OK |
 | `MOPSO` | Guided candidate validation | Accept candidate \(c\) only if \(\operatorname{SimCos}(E(c),E(target))>\operatorname{SimCos}(E(current),E(target))\) and \(\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\). | `_select_guided_candidate`; batched memory index. | OK |
 | `MOPSO` | Turbulence candidate validation | Accept candidate \(c\) only if \(\tau_{tur}^{min}\le\operatorname{SimCos}(E(c),E(current))\le\tau_{tur}^{max}\) and \(\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\). | `_select_turbulence_candidate`; `tau_tur_min`, `tau_tur_max`, `tau_dup`. | OK |
 | `ARCHIVE` | Pareto dominance | \(x\succ y\iff f_1(x)\ge f_1(y)\land f_2(x)\ge f_2(y)\land(f_1(x)>f_1(y)\lor f_2(x)>f_2(y))\). | `dominates`. | OK |

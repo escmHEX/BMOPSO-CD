@@ -9,6 +9,8 @@ from binary_mopso_cd.runner import ExperimentRunner
 
 
 class RecordingExecutor:
+    embedding_service = object()
+
     def save_caches(self) -> None:
         return None
 
@@ -42,6 +44,11 @@ class EmptyArchive:
     solutions: list[Solution] = []
 
 
+class InitialArchive:
+    def __init__(self, solutions: list[Solution]):
+        self.solutions = list(solutions)
+
+
 class RecordingEngine:
     central_anchors_received: list[str] | None = None
 
@@ -62,12 +69,19 @@ class RecordingEngine:
         return list(initial_population), EmptyArchive()
 
 
-def run_with_recording_services(test_config, tmp_path):
+class RecordingInitialArchiveEngine(RecordingEngine):
+    def run(self, initial_population, **_kwargs):
+        population = list(initial_population)
+        return population, InitialArchive(population)
+
+
+def run_with_recording_services(test_config, tmp_path, selection_enabled: bool = False):
     test_config.set("experiment.iterations", 1)
-    test_config.set("selection.enabled", False)
+    test_config.set("selection.enabled", selection_enabled)
     test_config.set("runtime.outdir_base", str(tmp_path / "exec"))
     RecordingInitialBuilder.select_calls = 0
     RecordingEngine.central_anchors_received = None
+    RecordingInitialArchiveEngine.central_anchors_received = None
     return ExperimentRunner(test_config, "Flooding near the bridge.").run_all()[0]
 
 
@@ -105,3 +119,31 @@ def test_runner_selects_central_anchors_once_when_anchor_prompting_is_enabled(
     assert RecordingInitialBuilder.select_calls == 1
     assert RecordingEngine.central_anchors_received == ["bridge", "flooding", "warning"]
     assert payload["central_anchors"] == ["bridge", "flooding", "warning"]
+
+
+def test_runner_skips_central_anchor_selection_when_all_components_are_frozen(
+    test_config,
+    tmp_path,
+    monkeypatch,
+):
+    test_config.set("experiment.frozen_components", ["role", "topic", "action"])
+    test_config.set("mopso.p_anchor_enabled", True)
+    monkeypatch.setattr(runner_module, "SemanticTaskExecutor", lambda *_args, **_kwargs: RecordingExecutor())
+    monkeypatch.setattr(runner_module, "InitialPopulationBuilder", RecordingInitialBuilder)
+    monkeypatch.setattr(runner_module, "BinaryMOPSOCDEngine", RecordingInitialArchiveEngine)
+
+    outdir = run_with_recording_services(test_config, tmp_path, selection_enabled=True)
+
+    payload = json.loads((outdir / "reference_context.json").read_text(encoding="utf-8"))
+    initial = json.loads((outdir / "data_initial_population.json").read_text(encoding="utf-8"))
+    population = json.loads((outdir / "population_evaluated.json").read_text(encoding="utf-8"))
+    pareto = json.loads((outdir / "pareto_front.json").read_text(encoding="utf-8"))
+    ranked = json.loads((outdir / "pareto_ranked.json").read_text(encoding="utf-8"))
+    selected = json.loads((outdir / "final_selection_hybrid.json").read_text(encoding="utf-8"))
+    assert RecordingInitialBuilder.select_calls == 0
+    assert RecordingInitialArchiveEngine.central_anchors_received == []
+    assert payload["central_anchors"] == []
+    assert population == initial
+    assert pareto == initial
+    assert ranked[0]["solution"] == initial[0]["solution_id"]
+    assert selected == initial
