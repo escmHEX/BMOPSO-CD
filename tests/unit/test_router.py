@@ -6,6 +6,7 @@ from binary_mopso_cd.router import (
     ALG_WORDNET_PPDB,
     TASK_ANCHORS,
     TASK_CENTRAL_ANCHOR_SELECTION,
+    TASK_SYNTHETIC_TEXT,
     TASK_WORD_REPLACEMENT,
     RouteTask,
     SemanticRouter,
@@ -34,6 +35,43 @@ def test_router_routes_central_anchor_selection_with_default_llm_params(test_con
     assert execution.alg_name == ALG_LLM
     assert execution.alg_params["temperature"] == 0.60
     assert execution.alg_params["top_p"] == 0.90
+
+
+def test_router_phase_task_model_override_takes_precedence(test_config):
+    test_config.set("router.phase_task_models.initialization.synthetic_text_generation", "qwen3.5:2b")
+    router = SemanticRouter(test_config)
+    task = RouteTask("1", "initialization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"})
+
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["model"] == "qwen3.5:2b"
+    assert execution.alg_params["temperature"] == 0.75
+    assert execution.alg_params["top_p"] == 0.95
+
+
+def test_router_optimization_synthetic_text_inherits_task_model_when_phase_model_is_null(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "llama3.1:8b-custom")
+    test_config.set("router.phase_task_models.optimization.synthetic_text_generation", None)
+    router = SemanticRouter(test_config)
+    task = RouteTask("1", "optimization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"})
+
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["model"] == "llama3.1:8b-custom"
+
+
+def test_router_task_model_override_still_applies_when_phase_model_is_null(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "qwen3.5:2b")
+    test_config.set("router.phase_task_models.initialization.synthetic_text_generation", None)
+    router = SemanticRouter(test_config)
+    task = RouteTask("1", "initialization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"})
+
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["model"] == "qwen3.5:2b"
 
 
 def test_router_word_replacement_uses_distilbert_with_context(test_config):

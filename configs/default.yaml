@@ -66,6 +66,21 @@ router:
     semantic_pool_expansion: "llama3.1:8b"
     semantic_component_influence_candidates: "llama3.1:8b"
     synthetic_text_generation: "llama3.1:8b"
+  phase_task_models:
+    initialization:
+      semantic_anchor_extraction: null
+      central_anchor_selection: null
+      semantic_pool_generation: null
+      semantic_pool_expansion: null
+      semantic_component_influence_candidates: null
+      synthetic_text_generation: null
+    optimization:
+      semantic_anchor_extraction: null
+      central_anchor_selection: null
+      semantic_pool_generation: null
+      semantic_pool_expansion: null
+      semantic_component_influence_candidates: null
+      synthetic_text_generation: null
   heuristics:
     semantic_anchor_extraction: true
     central_anchor_selection: true

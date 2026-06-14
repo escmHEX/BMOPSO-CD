@@ -41,11 +41,12 @@ def test_executor_async_llm_matches_sync_task_contract(test_config, tmp_path):
             return "async generated text"
 
     router = SemanticRouter(test_config)
+    test_config.set("router.phase_task_models.optimization.synthetic_text_generation", "qwen3.5:2b")
     llm_client = StubLLMClient()
     executor = SemanticTaskExecutor(test_config, outdir=tmp_path, llm_client=llm_client)
     task = RouteTask(
         "x",
-        "test",
+        "optimization",
         TASK_SYNTHETIC_TEXT,
         {
             "prompt": "Generate a short social media message related to crises and emergencies.",
@@ -57,5 +58,6 @@ def test_executor_async_llm_matches_sync_task_contract(test_config, tmp_path):
 
     assert result == "async generated text"
     assert llm_client.kwargs["semantic_task"] == TASK_SYNTHETIC_TEXT
+    assert llm_client.kwargs["model"] == "qwen3.5:2b"
     assert llm_client.kwargs["options"]["temperature"] == 0.75
     assert llm_client.kwargs["response_format"] is None

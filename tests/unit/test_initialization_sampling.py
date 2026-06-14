@@ -185,6 +185,7 @@ def test_generate_texts_uses_base_prompt_without_central_anchors(test_config):
     assert len(generated) == 2
     synthetic_tasks = [task for task in executor.tasks if task.semantic_task == TASK_SYNTHETIC_TEXT]
     assert len(synthetic_tasks) == 2
+    assert all(task.operation_context == "initialization" for task in synthetic_tasks)
     assert all("centralAnchors" not in task.task_params for task in synthetic_tasks)
     assert all("userPromptOverride" not in task.task_params for task in synthetic_tasks)
     assert all(solution.metadata["used_central_anchors"] is False for solution in generated)

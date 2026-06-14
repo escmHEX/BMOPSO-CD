@@ -45,6 +45,20 @@ def test_cli_set_applies_multiple_overrides(test_config):
     assert config.get("mopso.archive_multiplier") == 0.5
 
 
+def test_cli_set_updates_phase_task_model_override(test_config):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--reference-text",
+            "reference",
+            "--set",
+            "router.phase_task_models.initialization.synthetic_text_generation=qwen3.5:2b",
+        ]
+    )
+    config = apply_args(test_config, args)
+    assert config.get("router.phase_task_models.initialization.synthetic_text_generation") == "qwen3.5:2b"
+
+
 def test_cli_set_rejects_unknown_path(test_config):
     parser = build_parser()
     args = parser.parse_args(["--reference-text", "reference", "--set", "mopso.unknown=1"])

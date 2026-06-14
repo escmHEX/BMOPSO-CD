@@ -84,7 +84,12 @@ class SemanticRouter:
 
     def _route_llm(self, task: RouteTask) -> ExecutionTask:
         params = self._llm_params(task)
-        model = self.config.get(f"router.task_models.{task.semantic_task}") or self.config.get("ollama.default_model")
+        phase_model = self.config.get(f"router.phase_task_models.{task.operation_context}.{task.semantic_task}")
+        model = (
+            phase_model
+            if phase_model is not None
+            else self.config.get(f"router.task_models.{task.semantic_task}") or self.config.get("ollama.default_model")
+        )
         params["model"] = model
         return ExecutionTask(task.task_id, task.semantic_task, ALG_LLM, task.task_params, params)
 

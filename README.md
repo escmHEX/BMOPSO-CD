@@ -72,6 +72,7 @@ More examples:
 ```powershell
 --set ollama.default_model=llama3.1:8b
 --set router.task_models.synthetic_text_generation=qwen3.5:2b
+--set router.phase_task_models.initialization.synthetic_text_generation=qwen3.5:2b
 --set router.heuristics.semantic_pool_generation=false
 --set models.sbert.default=all-MiniLM-L6-v2
 --set models.ppdb.source_path=data/ppdb/ppdb-2.0-s-all
@@ -83,6 +84,10 @@ More examples:
 --set checkpoint.interval=1
 --set runtime.resume_from=exec/<run>/checkpoints/generation_0001.json
 ```
+
+Task-level LLM model overrides apply to every phase. Phase-task overrides apply
+only to the matching `RouteTask.operation_context` and inherit the task-level
+model when set to `null`.
 
 Speculative decoding is intentionally not supported in this version. The config
 contains a blocked flag so accidental activation fails during validation.
