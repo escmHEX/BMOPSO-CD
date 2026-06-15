@@ -116,6 +116,12 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 
 These generated artifacts are ignored by Git.
 
+`evolucion_metricas.csv` includes archive counters for each generation.
+`archive_update_count` is cumulative and only increases when the ordered
+normalized signatures in the external archive change. `archive_prune_count` is
+cumulative and increases once per update that performs pruning, regardless of
+how many solutions are removed.
+
 `config_effective.yaml` stores the final resolved configuration after `default.yaml`,
 `--config` and all `--set` overrides have been applied.
 

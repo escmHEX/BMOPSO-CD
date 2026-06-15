@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from binary_mopso_cd.runner import ExperimentRunner
@@ -23,6 +24,9 @@ def test_reduced_initialization_run_uses_real_services(test_config, tmp_path):
     assert (outdir / "reference.txt").exists()
     assert (outdir / "data_initial_population.json").exists()
     assert not (outdir / "checkpoints").exists()
+    runtime_log = (outdir / "runtime.log").read_text(encoding="utf-8")
+    assert "archive_updates=1" in runtime_log
+    assert "archive_prunes=0" in runtime_log
 
 
 def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
@@ -38,6 +42,10 @@ def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
     assert "modified_count" in row
     assert "hypervolume" in row
     assert "spread" in row
+    assert "archive_update_count" in row
+    assert "archive_prune_count" in row
+    assert int(row["archive_update_count"]) >= 1
+    assert int(row["archive_prune_count"]) >= 0
 
 
 def test_reduced_monitor_run_observes_without_decision_feedback(test_config, tmp_path):
@@ -56,6 +64,8 @@ def test_reduced_checkpoint_resume(test_config, tmp_path):
     first = run_with_config(test_config, tmp_path, "checkpoint_first")
     checkpoint = first / "checkpoints" / "generation_0001.json"
     assert checkpoint.exists()
+    checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert "archive_stats" in checkpoint_payload
 
     test_config.set("runtime.resume_from", str(checkpoint))
     test_config.set("experiment.iterations", 2)

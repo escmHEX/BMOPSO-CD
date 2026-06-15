@@ -141,9 +141,11 @@ hyperparameter rows.
 | `MOPSO` | Turbulence candidate validation | Accept candidate \(c\) only if \(\tau_{tur}^{min}\le\operatorname{SimCos}(E(c),E(current))\le\tau_{tur}^{max}\) and \(\max_{m\in Mem_d}\operatorname{SimCos}(E(c),E(m))<\tau_{dup}\). | `_select_turbulence_candidate`; `tau_tur_min`, `tau_tur_max`, `tau_dup`. | OK |
 | `ARCHIVE` | Pareto dominance | \(x\succ y\iff f_1(x)\ge f_1(y)\land f_2(x)\ge f_2(y)\land(f_1(x)>f_1(y)\lor f_2(x)>f_2(y))\). | `dominates`. | OK |
 | `ARCHIVE` | External archive update | \(A^t=ND(A^{t-1}\cup P^t)\), then prune if \(\lvert A^t\rvert>A_{max}\). | `ExternalArchive.update`. | OK |
+| `ARCHIVE` | Archive update counter | Count one update only when the ordered normalized signatures in the external archive change after `update`. | `ExternalArchive.update_count`; `evolucion_metricas.csv`. | OK |
 | `ARCHIVE` | Archive maximum size | \(A_{max}=2N\). | `archive_multiplier=2`; `ExternalArchive(max_size=2N)`. | OK |
 | `ARCHIVE` | Crowding distance | \(CD(x_r)\mathrel{+}= \frac{f_j(x_{r+1})-f_j(x_{r-1})}{f_j^{max}-f_j^{min}}\) for each objective \(j\); extremes receive \(\infty\). | `crowding_distance`; skips objectives with equal min and max. | OK |
 | `ARCHIVE` | Pruning by CD | While \(\lvert A\rvert>A_{max}\), remove one solution with minimum \(CD\), breaking ties randomly with run seed. | `ExternalArchive._prune`. | OK |
+| `ARCHIVE` | Archive prune counter | Count one prune event per update that performs pruning, not one count per removed solution. | `ExternalArchive.prune_count`; `evolucion_metricas.csv`. | OK |
 | `ARCHIVE` | Leader tournament | \(q_{eff}^{leader}=\min(q,\lvert A\rvert)\), \(q=3\); winner has maximum crowding distance. | `ExternalArchive.select_leader`; `leader_tournament_size=3`. | OK |
 | `PBEST` | pbest dominance rules | If \(x_{actual}\succ pbest_i\), update; if \(pbest_i\succ x_{actual}\), keep; otherwise compare \(U(x)\). | `PBestUpdater.update`. | OK |
 | `PBEST` | Utility normalization | \(\tilde f_1(x)=\frac{f_1(x)+1}{2}\), \(\tilde f_2(x)=\frac{f_2(x)}{2}\). | `utility`. | OK |

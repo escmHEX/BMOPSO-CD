@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from binary_mopso_cd import runner as runner_module
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.initialization import InitialPopulationResult
@@ -42,11 +44,15 @@ class RecordingInitialBuilder:
 
 class EmptyArchive:
     solutions: list[Solution] = []
+    update_count = 0
+    prune_count = 0
 
 
 class InitialArchive:
     def __init__(self, solutions: list[Solution]):
         self.solutions = list(solutions)
+        self.update_count = 1
+        self.prune_count = 0
 
 
 class RecordingEngine:
@@ -147,3 +153,10 @@ def test_runner_skips_central_anchor_selection_when_all_components_are_frozen(
     assert pareto == initial
     assert ranked[0]["solution"] == initial[0]["solution_id"]
     assert selected == initial
+
+
+def test_runner_rejects_legacy_checkpoint_without_archive_stats(test_config):
+    runner = ExperimentRunner(test_config, "reference")
+
+    with pytest.raises(ValueError, match="archive_stats"):
+        runner._archive_stats_from_checkpoint({"generation": 1})

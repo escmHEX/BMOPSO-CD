@@ -40,7 +40,17 @@ def test_progress_logger_writes_generation_line(test_config, tmp_path):
     test_config.set("logging.console", False)
     logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
 
-    logger.generation(1, 2, modified_count=3, population_size=4, archive_size=5, hypervolume=0.25, spread=None)
+    logger.generation(
+        1,
+        2,
+        modified_count=3,
+        population_size=4,
+        archive_size=5,
+        hypervolume=0.25,
+        spread=None,
+        archive_update_count=2,
+        archive_prune_count=1,
+    )
     logger.close()
 
     text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
@@ -49,6 +59,21 @@ def test_progress_logger_writes_generation_line(test_config, tmp_path):
     assert "archive=5" in text
     assert "hv=0.250000" in text
     assert "spread=NA" in text
+    assert "archive_updates=2" in text
+    assert "archive_prunes=1" in text
+
+
+def test_progress_logger_writes_archive_counts_on_finish(test_config, tmp_path):
+    test_config.set("logging.console", False)
+    logger = ProgressLogger(test_config, tmp_path, run_index=1, total_runs=1)
+
+    logger.finish(tmp_path, archive_update_count=3, archive_prune_count=2)
+    logger.close()
+
+    text = (tmp_path / "runtime.log").read_text(encoding="utf-8")
+    assert "finished" in text
+    assert "archive_updates=3" in text
+    assert "archive_prunes=2" in text
 
 
 def test_progress_logger_writes_stage_and_generation_start(test_config, tmp_path):

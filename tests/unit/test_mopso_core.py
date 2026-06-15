@@ -136,6 +136,35 @@ def test_external_archive_keeps_non_dominated_and_prunes():
     assert len(archive.solutions) == 2
 
 
+def test_external_archive_counts_only_real_signature_changes():
+    archive = ExternalArchive(max_size=4, rng=Random(1))
+    archive.update([make_solution(0.8, 0.8, 1)])
+
+    assert archive.update_count == 1
+    assert archive.prune_count == 0
+
+    archive.update([make_solution(0.1, 0.1, 2)])
+    duplicate = Solution(
+        SemanticVector({"role": " role 1 ", "topic": "TOPIC 1", "action": "action 1"}),
+        "duplicate prompt",
+        "duplicate text",
+        Objectives(1.0, 1.0),
+    )
+    archive.update([duplicate])
+
+    assert archive.update_count == 1
+    assert archive.prune_count == 0
+
+
+def test_external_archive_counts_prune_event_once_for_multiple_removals():
+    archive = ExternalArchive(max_size=1, rng=Random(1))
+    archive.update([make_solution(0.1, 0.9, 1), make_solution(0.5, 0.5, 2), make_solution(0.9, 0.1, 3)])
+
+    assert len(archive.solutions) == 1
+    assert archive.update_count == 1
+    assert archive.prune_count == 1
+
+
 def test_archive_capacity_supports_fractional_multipliers():
     assert archive_capacity(100, 0.5) == 50
     assert archive_capacity(100, 0.25) == 25
@@ -350,12 +379,38 @@ def test_mopso_text_generation_uses_base_prompt_and_checkpoint_persists_anchors(
     )
 
     engine._generate_text("prompt text")
+    engine.archive.update_count = 2
+    engine.archive.prune_count = 1
     payload = engine._checkpoint_payload(1, [], [], [])
 
     assert "centralAnchors" not in executor.executed_task.task_params
     assert "userPromptOverride" not in executor.executed_task.task_params
     assert payload["central_anchors"] == central_anchors
     assert payload["semantic_anchors"] == semantic_anchors
+    assert payload["archive_stats"] == {"update_count": 2, "prune_count": 1}
+
+
+def test_mopso_restores_archive_stats_from_checkpoint_state(test_config, tmp_path):
+    test_config.set("experiment.frozen_components", ["role", "topic", "action"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        StubExecutor(),
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    archived = make_solution(0.5, 0.5, 1)
+
+    _population, archive = engine.run(
+        [archived],
+        archive_state=[archived],
+        archive_stats={"update_count": 4, "prune_count": 2},
+        component_memory={},
+    )
+
+    assert archive.update_count == 4
+    assert archive.prune_count == 2
 
 
 def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_config, tmp_path):

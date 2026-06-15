@@ -54,6 +54,7 @@ class ExperimentRunner:
                 initial_population = [solution_from_dict(item) for item in checkpoint_payload["population"]]
                 pbest_state = [solution_from_dict(item) for item in checkpoint_payload["pbest"]]
                 archive_state = [solution_from_dict(item) for item in checkpoint_payload["archive"]]
+                archive_stats = self._archive_stats_from_checkpoint(checkpoint_payload)
                 component_memory = dict(checkpoint_payload.get("component_memory", {}))
                 semantic_anchors = {
                     str(key): [str(item).strip() for item in values if str(item).strip()]
@@ -90,6 +91,7 @@ class ExperimentRunner:
                 semantic_anchors = initial_result.semantic_anchors
                 pbest_state = None
                 archive_state = None
+                archive_stats = None
                 component_memory = None
                 start_generation = 0
                 central_anchors = (
@@ -123,6 +125,7 @@ class ExperimentRunner:
                 start_generation=start_generation,
                 pbest_state=pbest_state,
                 archive_state=archive_state,
+                archive_stats=archive_stats,
                 component_memory=component_memory,
             )
             progress.stage(5, 6, "Escribiendo frente y seleccion final")
@@ -157,7 +160,7 @@ class ExperimentRunner:
             executor.save_caches()
             timer.write(outdir / "runtime.txt", {"run_index": run_index or 1})
             progress.stage(6, 6, "Finalizando corrida")
-            progress.finish(outdir)
+            progress.finish(outdir, archive.update_count, archive.prune_count)
             return outdir
         except Exception:
             progress.exception("run %s/%s failed", run_index or 1, config.runs)
@@ -170,6 +173,15 @@ class ExperimentRunner:
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def _archive_stats_from_checkpoint(self, checkpoint_payload: dict) -> dict[str, int]:
+        archive_stats = checkpoint_payload.get("archive_stats")
+        if not isinstance(archive_stats, dict):
+            raise ValueError("Checkpoint is missing archive_stats; cannot resume archive metrics accurately")
+        return {
+            "update_count": int(archive_stats["update_count"]),
+            "prune_count": int(archive_stats["prune_count"]),
+        }
 
     def _should_select_central_anchors(self, config: RuntimeConfig, start_generation: int) -> bool:
         active_components = set(config.components).difference(config.frozen_components)

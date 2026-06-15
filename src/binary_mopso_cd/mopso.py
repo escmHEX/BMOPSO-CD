@@ -123,10 +123,16 @@ class ExternalArchive:
     max_size: int
     rng: Random
     solutions: list[Solution] = field(default_factory=list)
+    update_count: int = 0
+    prune_count: int = 0
 
     def update(self, candidates: list[Solution]) -> list[Solution]:
+        previous_signatures = self._signature_state()
         merged = deduplicate_solutions_by_signature(self.solutions + [candidate.clone() for candidate in candidates])
         self.solutions = non_dominated(merged)
+        pruned = len(self.solutions) > self.max_size
+        if pruned:
+            self.prune_count += 1
         while len(self.solutions) > self.max_size:
             distances = crowding_distance(self.solutions)
             finite_values = [value for value in distances.values() if not math.isinf(value)]
@@ -134,7 +140,12 @@ class ExternalArchive:
             tied = [solution for solution in self.solutions if distances[solution.solution_id] == min_distance]
             remove = self.rng.choice(tied)
             self.solutions = [solution for solution in self.solutions if solution.solution_id != remove.solution_id]
+        if self._signature_state() != previous_signatures:
+            self.update_count += 1
         return self.solutions
+
+    def _signature_state(self) -> tuple[SolutionSignature, ...]:
+        return tuple(solution.vector.signature() for solution in self.solutions)
 
     def select_leader(self, tournament_size: int) -> Solution:
         if not self.solutions:
@@ -241,12 +252,17 @@ class BinaryMOPSOCDEngine:
         start_generation: int = 0,
         pbest_state: list[Solution] | None = None,
         archive_state: list[Solution] | None = None,
+        archive_stats: dict[str, int] | None = None,
         component_memory: dict[str, list[str]] | None = None,
     ) -> tuple[list[Solution], ExternalArchive]:
         population = [solution.clone(keep_id=True) for solution in initial_population]
         pbest = [solution.clone() for solution in (pbest_state or population)]
         if archive_state is not None:
+            if archive_stats is None:
+                raise ValueError("Checkpoint is missing archive_stats; cannot resume archive metrics accurately")
             self.archive.solutions = [solution.clone() for solution in archive_state]
+            self.archive.update_count = archive_stats["update_count"]
+            self.archive.prune_count = archive_stats["prune_count"]
         else:
             self.archive.update(population)
         if component_memory is not None:
@@ -300,6 +316,8 @@ class BinaryMOPSOCDEngine:
                         len(self.archive.solutions),
                         row["hypervolume"],
                         row["spread"],
+                        row["archive_update_count"],
+                        row["archive_prune_count"],
                     )
                 monitor_result = self.monitor.observe(generation, population)
                 if self.monitor.enabled:
@@ -905,6 +923,8 @@ class BinaryMOPSOCDEngine:
             "mean_f2": float(np.mean(f2)) if f2 else 0.0,
             "max_f2": float(np.max(f2)) if f2 else 0.0,
             "archive_size": len(self.archive.solutions),
+            "archive_update_count": self.archive.update_count,
+            "archive_prune_count": self.archive.prune_count,
             "generated_with_central_anchors": sum(
                 1 for solution in population if solution.changed and solution.metadata.get("used_central_anchors") is True
             ),
@@ -953,6 +973,10 @@ class BinaryMOPSOCDEngine:
             "population": [solution_to_dict(solution) for solution in population],
             "pbest": [solution_to_dict(solution) for solution in pbest],
             "archive": [solution_to_dict(solution) for solution in self.archive.solutions],
+            "archive_stats": {
+                "update_count": self.archive.update_count,
+                "prune_count": self.archive.prune_count,
+            },
             "component_memory": self.component_memory.to_snapshot(),
             "rng_state": rng_to_text(self.rng),
             "metrics": metrics_rows,
