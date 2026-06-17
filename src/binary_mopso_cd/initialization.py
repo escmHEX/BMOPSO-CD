@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from random import Random
@@ -26,7 +27,7 @@ from binary_mopso_cd.router import (
     SemanticRouter,
 )
 from binary_mopso_cd.settings import ComponentSettings, InitializationSettings, ParallelismSettings
-from binary_mopso_cd.utils import canonical_text, unique_preserve_order, word_count
+from binary_mopso_cd.utils import canonical_text, word_count
 
 
 DEFAULT_NUM_CENTRAL_ANCHORS = 4
@@ -51,6 +52,13 @@ class InitialTextGenerationResult:
     diversity_score: float
     text: str | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class PoolValidationResult:
+    valid_items: list[str]
+    rejected_items: list[dict[str, Any]]
+    max_words: int
 
 
 class InitialPopulationBuilder:
@@ -90,7 +98,11 @@ class InitialPopulationBuilder:
             self._expand_one_pool(pools, min_product, reference_text, anchors, central_anchor_count, domain)
         product = math.prod(len(values) for values in pools.values())
         if product < min_product:
-            raise RuntimeError(f"Initial semantic pools are insufficient: product={product}, required={min_product}")
+            pool_sizes = self._pool_size_summary(pools)
+            raise RuntimeError(
+                f"Initial semantic pools are insufficient: product={product}, required={min_product}, "
+                f"pool_sizes={pool_sizes}. See initialization_pool_diagnostics.jsonl."
+            )
         candidates = self._candidate_vectors(pools)
         reduced = self._reduce_by_prompt_diversity(candidates, domain, 2 * n)
         generated = self._generate_texts(reduced, reference_text)
@@ -170,7 +182,27 @@ class InitialPopulationBuilder:
             },
         )
         raw = self.executor.execute(self.router.route(route))
-        return validate_pool(component, raw, self.config)
+        raw_items = [str(item) for item in raw]
+        validation = validate_pool_with_diagnostics(component, raw_items, self.config, existing=existing or [])
+        self._write_pool_diagnostic(
+            {
+                "phase": "initialization",
+                "task": task_name,
+                "component": component,
+                "requested_items": quantity,
+                "existing_items": existing or [],
+                "existing_count": len(existing or []),
+                "raw_items": raw_items,
+                "raw_count": len(raw_items),
+                "valid_items": validation.valid_items,
+                "valid_count": len(validation.valid_items),
+                "rejected_items": validation.rejected_items,
+                "rejected_count": len(validation.rejected_items),
+                "max_words": validation.max_words,
+                "pool_size_after": len(existing or []) + len(validation.valid_items),
+            }
+        )
+        return validation.valid_items
 
     def _expand_one_pool(
         self,
@@ -201,6 +233,9 @@ class InitialPopulationBuilder:
             pools[component] = validate_pool(component, pools[component] + additions, self.config)
             if math.prod(len(values) for values in pools.values()) >= required_product:
                 return
+
+    def _pool_size_summary(self, pools: dict[str, list[str]]) -> dict[str, int]:
+        return {component: len(pools.get(component, [])) for component in self.components.order}
 
     def _candidate_vectors(self, pools: dict[str, list[str]]) -> list[SemanticVector]:
         components = self.components.order
@@ -409,12 +444,18 @@ class InitialPopulationBuilder:
     def _write_rejections(self, rows: list[dict[str, Any]]) -> None:
         if not rows or self.executor.outdir is None:
             return
-        import json
 
         path = self.executor.outdir / "initialization_rejections.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _write_pool_diagnostic(self, row: dict[str, Any]) -> None:
+        if self.executor.outdir is None:
+            return
+        path = self.executor.outdir / "initialization_pool_diagnostics.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def choose_pool_sizes(n: int, config: RuntimeConfig) -> dict[str, int]:
@@ -432,16 +473,42 @@ def choose_pool_sizes(n: int, config: RuntimeConfig) -> dict[str, int]:
 
 
 def validate_pool(component: str, values: list[str], config: RuntimeConfig) -> list[str]:
+    return validate_pool_with_diagnostics(component, values, config).valid_items
+
+
+def validate_pool_with_diagnostics(
+    component: str,
+    values: list[str],
+    config: RuntimeConfig,
+    existing: list[str] | None = None,
+) -> PoolValidationResult:
     max_words = ComponentSettings.from_config(config).max_words[component]
-    valid = []
+    existing_keys = {canonical_text(value) for value in existing or [] if canonical_text(value)}
+    seen = set(existing_keys)
+    valid: list[str] = []
+    rejected: list[dict[str, Any]] = []
     for value in values:
         text = str(value).strip()
         if not text or "\n" in text:
+            rejected.append({"item": str(value), "reason": "empty" if not text else "contains_newline"})
             continue
         if word_count(text) > max_words:
+            rejected.append(
+                {
+                    "item": text,
+                    "reason": "too_many_words",
+                    "word_count": word_count(text),
+                    "max_words": max_words,
+                }
+            )
             continue
-        valid.append(text)
-    return unique_preserve_order(valid)
+        normalized = canonical_text(text)
+        if normalized in seen:
+            rejected.append({"item": text, "reason": "duplicate"})
+            continue
+        seen.add(normalized)
+        valid.append(" ".join(text.split()))
+    return PoolValidationResult(valid, rejected, max_words)
 
 
 def count_anchors(anchors: dict[str, list[str]]) -> int:

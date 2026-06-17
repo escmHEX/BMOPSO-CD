@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from random import Random
 
 import numpy as np
@@ -140,6 +141,96 @@ def test_build_pool_passes_strategy_component_context(test_config):
     assert params["anchors"] == anchors
     assert params["domain"] == "social media messages related to crises and emergencies"
     assert "Return communicative intents" in params["component_additional_instruction"]
+
+
+def test_build_pool_writes_component_validation_diagnostics(test_config, tmp_path):
+    class MixedPoolExecutor(RecordingExecutor):
+        def __init__(self):
+            super().__init__()
+            self.outdir = tmp_path
+
+        def execute(self, task):
+            self.tasks.append(task)
+            return [
+                "valid role",
+                "",
+                "line\nbreak",
+                "one two three four five six seven",
+                "valid role",
+                "existing role",
+            ]
+
+    executor = MixedPoolExecutor()
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
+
+    pool = builder._build_pool(
+        "role",
+        6,
+        "Flooded roads near the bridge need urgent support.",
+        {"entities": ["bridge"]},
+        central_anchor_count=1,
+        domain="social media messages related to crises and emergencies",
+        existing=["existing role"],
+        task_name=TASK_POOL_EXPANSION,
+    )
+
+    assert pool == ["valid role"]
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "initialization_pool_diagnostics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["component"] == "role"
+    assert row["task"] == TASK_POOL_EXPANSION
+    assert row["requested_items"] == 6
+    assert row["existing_items"] == ["existing role"]
+    assert row["raw_count"] == 6
+    assert row["valid_items"] == ["valid role"]
+    assert row["pool_size_after"] == 2
+    reasons = [item["reason"] for item in row["rejected_items"]]
+    assert "empty" in reasons
+    assert "contains_newline" in reasons
+    assert "too_many_words" in reasons
+    assert reasons.count("duplicate") == 2
+
+
+def test_insufficient_pool_error_reports_component_sizes(test_config, tmp_path):
+    class EmptyTopicExecutor(RecordingExecutor):
+        def __init__(self):
+            super().__init__()
+            self.outdir = tmp_path
+
+        def execute(self, task):
+            self.tasks.append(task)
+            if task.semantic_task == TASK_ANCHORS:
+                return {
+                    "entities": ["park"],
+                    "topics": ["cleanup drive"],
+                    "actions": ["organize"],
+                    "constraints": ["9 AM"],
+                }
+            if task.task_params["component"] == "topic":
+                return []
+            return [f"{task.task_params['component']} item"]
+
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), EmptyTopicExecutor(), Random(1))
+
+    try:
+        builder.build_with_context("We're organizing a cleanup drive in the park at 9 AM")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected insufficient pool error")
+
+    assert "Initial semantic pools are insufficient" in message
+    assert "pool_sizes={'role': 1, 'topic': 0, 'action': 1}" in message
+    assert "initialization_pool_diagnostics.jsonl" in message
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "initialization_pool_diagnostics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(row["component"] == "topic" and row["valid_count"] == 0 for row in rows)
 
 
 def test_reference_context_extracts_semantic_anchors_without_central_selection(test_config):
