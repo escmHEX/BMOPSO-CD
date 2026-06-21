@@ -51,6 +51,14 @@ def ollama_usage_metadata(response: Any) -> dict[str, Any]:
         if value is not None:
             metadata[output_key] = value
             metadata[source_key] = value
+    input_tokens = response_value(response, "prompt_eval_count")
+    output_tokens = response_value(response, "eval_count")
+    if input_tokens is not None:
+        metadata["input_tokens"] = int(input_tokens)
+    if output_tokens is not None:
+        metadata["output_tokens"] = int(output_tokens)
+    if input_tokens is not None and output_tokens is not None:
+        metadata["total_tokens"] = int(input_tokens) + int(output_tokens)
     return metadata
 
 

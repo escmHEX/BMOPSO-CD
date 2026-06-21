@@ -161,8 +161,8 @@ hyperparameter rows.
 | `SELECT` | Non-negative redundancy | \(\operatorname{Sim}_+(u,v)=\max(0,\operatorname{SimCos}(u,v))\). | `mmr_select`; embeddings for generated texts. | OK |
 | `SELECT` | MMR score | \(\operatorname{MMR}(x)=\lambda C_x-(1-\lambda)\max_{y\in S}\operatorname{Sim}_+(E(G_x),E(G_y))\). | `mmr_select`; `selection.lambda_mmr=0.35`. | OK |
 | `SELECT` | Final selection count | \(K_{eff}=\min(K_{sel},n_f)\). | `selection.k`; loop stops at \(K_{sel}\) or no remaining candidates. | OK |
-| `MONITOR` | KMeans inertia | \(I=\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\). | `ObservationalMonitor.observe`; not read by optimizer. | OK |
-| `MONITOR` | Entity entropy | \(H_{ent}=-\sum_{\ell}p_\ell\ln p_\ell\), where \(p_\ell\) is the empirical frequency of entity label \(\ell\). | `entity_entropy`; spaCy labels only; not read by optimizer. | OK |
+| `MONITOR` | KMeans inertia | \(I=\frac{1}{n}\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\), with SBERT `all-MiniLM-L6-v2`, normalized embeddings, \(k=\min(5,n)\), `random_state=0`, `n_init=10`, and EVOLMD-MO empty-text placeholder `[texto vacío]`. | `calculate_kmeans_inertia`; not read by optimizer. | OK |
+| `MONITOR` | Entity entropy | \(H_{ent}=H_2(C)/\log_2(N_{tokens})\), where \(C\) are lowercase lemmas with POS in `{NOUN, VERB, ADJ}`. | `calculate_entity_entropy`; conceptual entropy compatible with EVOLMD-MO; not read by optimizer. | OK |
 | `RUNTIME` | HV logging normalization | \(x=\operatorname{clip}((f_1+1)/2,0,1)\), \(y=\operatorname{clip}(f_2/2,0,1)\). | `metrics.normalized_objective_point`; used only for progress metrics. | OK |
 | `RUNTIME` | Hypervolume progress metric | \(HV=\sum_k(x_k-x_{k-1})y_k\), over collapsed non-dominated points sorted by \(x\), with reference \((0,0)\). | `metrics.calculate_hypervolume`; not read by optimizer. | OK |
 | `RUNTIME` | Spread progress metric | \(Spread=\frac{\sum_i\lvert d_i-\bar d\rvert}{m\bar d}\), where \(d_i\) are consecutive distances in the normalized non-dominated front. | `metrics.calculate_spread`; not read by optimizer. | OK |
@@ -244,7 +244,7 @@ hyperparameter rows.
 | `SELECT` | MMR lambda | \(\lambda_{MMR}\) | 0.35 | `selection.lambda_mmr` | Tradeoff between TOPSIS relevance and redundancy penalty. | OK |
 | `SELECT` | Entropy epsilon | \(\varepsilon\) | 0.0001 | `selection.epsilon` | Positive displacement for Entropy Method column shift. | OK |
 | `MONITOR` | Monitor enabled | \(mon\) | `false` | `monitor.enabled`, `--enable-monitor` | Observational metrics only; no optimizer feedback. | OK |
-| `MONITOR` | KMeans clusters | \(k_{km}\) | 3 | `monitor.kmeans_clusters` | Cluster count for external inertia metric. | OK |
+| `MONITOR` | KMeans clusters | \(k_{km}\) | `min(5,n)` | `EVOLMD_MO_KMEANS_CLUSTERS` | Fixed EVOLMD-MO-compatible external inertia setting. | OK |
 | `CHECKPOINT` | Checkpoint enabled | \(ckpt\) | `false` | `checkpoint.enabled` | Deferred checkpoints disabled by default. | OK |
 | `CHECKPOINT` | Checkpoint interval | \(I_{ckpt}\) | 1 | `checkpoint.interval`, `--checkpoint-every` | Save cadence when checkpoints are enabled. | OK |
 | `CHECKPOINT` | Checkpoint directory | \(dir_{ckpt}\) | `checkpoints` | `checkpoint.directory` | Subdirectory under run output. | OK |
@@ -253,6 +253,7 @@ hyperparameter rows.
 | `RUNTIME` | Embedding cache file | \(cache_E\) | `embedding_cache.json` | `runtime.embedding_cache_file` | Persistent embedding cache path in outputs. | OK |
 | `RUNTIME` | Eager model loading | \(load_{eager}\) | `true` | `runtime.eager_load_models` | Loads heavy services once at executor startup. | OK |
 | `RUNTIME` | Progress logging | \(log\) | `true`, `runtime.log` | `logging.enabled`, `logging.console`, `logging.file`, `logging.level` | Logs run start/end, generation progress, modified count, HV, spread and errors without extra model calls. | OK |
+| `RUNTIME` | Cost metrics | \(cost\) | `runtime.txt`, `cost_metrics.json`, `llm_calls.jsonl` | `RuntimeTimer`, `write_cost_metrics`, `LLMCallLogger` | Wall-clock seconds, LLM calls, input tokens and output tokens per run. | OK |
 
 ## Fidelity Traceability
 

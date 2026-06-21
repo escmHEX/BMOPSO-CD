@@ -192,4 +192,3 @@ selection:
 
 monitor:
   enabled: false
-  kmeans_clusters: 3

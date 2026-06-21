@@ -237,7 +237,7 @@ class BinaryMOPSOCDEngine:
         self.monitor = ObservationalMonitor(
             enabled=bool(config.get("monitor.enabled", False)),
             spacy_model=str(config.get("models.spacy.model", "en_core_web_sm")),
-            kmeans_clusters=int(config.get("monitor.kmeans_clusters", 3)),
+            embedding_service=executor.embedding_service,
         )
         self.checkpoints = CheckpointManager(
             enabled=checkpoint.enabled,

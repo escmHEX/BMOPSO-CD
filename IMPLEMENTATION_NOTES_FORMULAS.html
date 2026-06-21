@@ -397,8 +397,8 @@
   <section class="section monitor">
     <h3>MONITOR - Metricas observacionales</h3>
     <div class="formula-grid">
-      <div class="formula-card"><h4>KMeans inertia</h4><div class="math">\[I=\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2\]</div><p>No alimenta decisiones del optimizador.</p></div>
-      <div class="formula-card"><h4>Entropia de entidades</h4><div class="math">\[H_{ent}=-\sum_{\ell}p_\ell\ln p_\ell\]</div><p>\(p_\ell\) es la frecuencia empirica de la etiqueta de entidad \(\ell\).</p></div>
+      <div class="formula-card"><h4>KMeans inertia</h4><div class="math">\[I=\frac{1}{n}\sum_i\lVert z_i-\mu_{cluster(i)}\rVert_2^2,\quad k=\min(5,n)\]</div><p>Usa SBERT all-MiniLM-L6-v2, embeddings normalizados, random_state=0 y n_init=10. No alimenta decisiones del optimizador.</p></div>
+      <div class="formula-card"><h4>Entropia conceptual</h4><div class="math">\[H_{ent}=H_2(C)/\log_2(N_{tokens})\]</div><p>\(C\) son lemas en minuscula de sustantivos, verbos y adjetivos, compatible con EVOLMD-MO.</p></div>
     </div>
   </section>
 
@@ -472,7 +472,7 @@
       <tr class="select"><td>SELECT</td><td>MMR lambda</td><td>\(\lambda_{MMR}\)</td><td>0.35</td><td><code>selection.lambda_mmr</code></td><td>Relevancia vs redundancia.</td><td class="status-ok">OK</td></tr>
       <tr class="select"><td>SELECT</td><td>Entropy epsilon</td><td>\(\varepsilon\)</td><td>0.0001</td><td><code>selection.epsilon</code></td><td>Desplazamiento positivo para Entropy Method.</td><td class="status-ok">OK</td></tr>
       <tr class="monitor"><td>MONITOR</td><td>Monitor</td><td>\(mon\)</td><td>false</td><td><code>monitor.enabled</code>, <code>--enable-monitor</code></td><td>Metricas externas.</td><td class="status-ok">OK</td></tr>
-      <tr class="monitor"><td>MONITOR</td><td>KMeans clusters</td><td>\(k_{km}\)</td><td>3</td><td><code>monitor.kmeans_clusters</code></td><td>Inertia.</td><td class="status-ok">OK</td></tr>
+      <tr class="monitor"><td>MONITOR</td><td>KMeans clusters</td><td>\(k_{km}\)</td><td>min(5,n)</td><td><code>EVOLMD_MO_KMEANS_CLUSTERS</code></td><td>Inertia compatible con EVOLMD-MO.</td><td class="status-ok">OK</td></tr>
       <tr class="checkpoint"><td>CHECKPOINT</td><td>Checkpoint activo</td><td>\(ckpt\)</td><td>false</td><td><code>checkpoint.enabled</code></td><td>Desactivado por defecto.</td><td class="status-ok">OK</td></tr>
       <tr class="checkpoint"><td>CHECKPOINT</td><td>Intervalo</td><td>\(I_{ckpt}\)</td><td>1</td><td><code>checkpoint.interval</code>, <code>--checkpoint-every</code></td><td>Cadencia si esta activo.</td><td class="status-ok">OK</td></tr>
       <tr class="runtime"><td>RUNTIME</td><td>Output base</td><td>\(outdir\)</td><td>exec</td><td><code>runtime.outdir_base</code>, <code>--outdir-base</code></td><td>Carpetas EVOLMD-MO.</td><td class="status-ok">OK</td></tr>

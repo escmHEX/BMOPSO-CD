@@ -24,6 +24,9 @@ def test_ollama_usage_metadata_converts_nanoseconds_and_token_counts():
     assert metadata["ollamaEvalDurationSeconds"] == 0.7
     assert metadata["promptEvalCount"] == 12
     assert metadata["evalCount"] == 34
+    assert metadata["input_tokens"] == 12
+    assert metadata["output_tokens"] == 34
+    assert metadata["total_tokens"] == 46
     assert metadata["total_duration"] == 2_500_000_000
 
 
@@ -59,6 +62,9 @@ def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_pat
     assert call["ollamaTotalDurationSeconds"] == 1.0
     assert call["promptEvalCount"] == 5
     assert call["evalCount"] == 7
+    assert call["input_tokens"] == 5
+    assert call["output_tokens"] == 7
+    assert call["total_tokens"] == 12
     assert call["message_count"] == 2
 
 

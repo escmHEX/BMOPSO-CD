@@ -9,7 +9,7 @@ from binary_mopso_cd.entities import solution_from_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.initialization import InitialPopulationBuilder
 from binary_mopso_cd.mopso import BinaryMOPSOCDEngine, non_dominated
-from binary_mopso_cd.outputs import RuntimeTimer, create_run_dir, write_config, write_json, write_solutions
+from binary_mopso_cd.outputs import RuntimeTimer, create_run_dir, write_config, write_cost_metrics, write_json, write_solutions
 from binary_mopso_cd.progress import ProgressLogger
 from binary_mopso_cd.router import SemanticRouter
 from binary_mopso_cd.selection import mmr_select, rank_solutions
@@ -158,7 +158,12 @@ class ExperimentRunner:
                 )
                 write_solutions(outdir / "final_selection_hybrid.json", [item.solution for item in selected])
             executor.save_caches()
-            timer.write(outdir / "runtime.txt", {"run_index": run_index or 1})
+            runtime_payload = timer.write(outdir / "runtime.txt", {"run_index": run_index or 1})
+            write_cost_metrics(
+                outdir / "cost_metrics.json",
+                llm_log_path=outdir / "llm_calls.jsonl",
+                wall_clock_seconds=float(runtime_payload["runtime_seconds"]),
+            )
             progress.stage(6, 6, "Finalizando corrida")
             progress.finish(outdir, archive.update_count, archive.prune_count)
             return outdir

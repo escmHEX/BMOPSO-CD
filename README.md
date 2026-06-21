@@ -111,10 +111,16 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 - `runtime.txt`
 - `runtime.log`
 - `llm_calls.jsonl`
+- `cost_metrics.json`
+- `monitor_metrics.csv` when `monitor.enabled=true`
 - `archive_history.jsonl`
 - `checkpoints/generation_*.json` when checkpointing is enabled
 
 These generated artifacts are ignored by Git.
+
+`runtime.txt` includes both `runtime_seconds` and the EVOLMD-MO-compatible
+`total_sec` alias. `cost_metrics.json` summarizes wall-clock seconds, LLM calls,
+input tokens and output tokens from `llm_calls.jsonl`.
 
 `evolucion_metricas.csv` includes archive counters for each generation.
 `archive_update_count` is cumulative and only increases when the ordered

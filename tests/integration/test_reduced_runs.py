@@ -36,7 +36,13 @@ def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
     assert (outdir / "population_evaluated.json").exists()
     assert (outdir / "pareto_front.json").exists()
     assert (outdir / "llm_calls.jsonl").exists()
+    assert (outdir / "cost_metrics.json").exists()
     assert (outdir / "runtime.log").exists()
+    cost_metrics = json.loads((outdir / "cost_metrics.json").read_text(encoding="utf-8"))
+    assert "wall_clock_seconds" in cost_metrics
+    assert "llm_calls_total" in cost_metrics
+    runtime_txt = (outdir / "runtime.txt").read_text(encoding="utf-8")
+    assert "total_sec:" in runtime_txt
     with (outdir / "evolucion_metricas.csv").open("r", encoding="utf-8") as handle:
         row = next(csv.DictReader(handle))
     assert "modified_count" in row
@@ -54,6 +60,10 @@ def test_reduced_monitor_run_observes_without_decision_feedback(test_config, tmp
     test_config.set("monitor.enabled", True)
     outdir = run_with_config(test_config, tmp_path, "monitor")
     assert (outdir / "monitor_metrics.csv").exists()
+    with (outdir / "monitor_metrics.csv").open("r", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert "kmeans_inertia" in row
+    assert "entity_entropy" in row
 
 
 def test_reduced_checkpoint_resume(test_config, tmp_path):
