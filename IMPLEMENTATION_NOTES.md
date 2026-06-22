@@ -13,6 +13,9 @@ Ollama usage, and external observational metrics.
   ownership live in the executor and services.
 - Ollama calls are single-shot `system` plus `user` requests with `stream=false`.
   No conversational history is retained between calls.
+- Ollama thinking is disabled by default in every router LLM parameter bucket.
+  Task-level `thinking` is passed as the per-call Ollama `think` value, with
+  `ollama.think` kept as the compatibility fallback when a routed task lacks it.
 - SBERT embeddings are batched and cached with keys that include text type,
   model alias, config version, and canonical text.
 - Heavy resources are service-owned and loaded once per executor process.
@@ -110,7 +113,7 @@ hyperparameter rows.
 | `ROUTER` | Influence candidate sampling | \(T(t)=T_{start}-(T_{start}-T_{end})\rho(t,G)\); \(p_{top}(t)=p_{start}-(p_{start}-p_{end})\rho(t,G)\). Defaults: \(T(t)=0.70-0.20\rho\), \(p_{top}(t)=0.95-0.05\rho\). | `router.llm_params.semantic_component_influence_candidates`. | OK |
 | `ROUTER` | Anchor extraction policy | If \(n_y\le6\), use \(T=0.25,p_{top}=0.90\); otherwise \(T=0.20,p_{top}=0.85\). | `router.llm_params.semantic_anchor_extraction.short_word_threshold`. | OK |
 | `ROUTER` | Pool evidence policy | Low evidence if \(n_y\le6\) or \(a_c<4\). Select \((T,p_{top})\) by component and evidence state. | `router.llm_params.semantic_pool_generation`. | OK |
-| `EXEC` | LLM execution | \(y=LLM(S_{\tau},U_{\tau}(p');\theta)\). | `SemanticTaskExecutor`; `ollama.stream=false`; no conversational history is retained. | OK |
+| `EXEC` | LLM execution | \(y=LLM(S_{\tau},U_{\tau}(p');\theta)\). | `SemanticTaskExecutor`; `ollama.stream=false`; no conversational history is retained; per-task `thinking` controls Ollama `think`. | OK |
 | `EXEC` | Embedding execution | \(e=E(s)\in\mathbb{R}^{d_z}\). | `EmbeddingService.encode`; SBERT model from `models.sbert.*`. | OK |
 | `EXEC` | Synthetic text generation | \(G_i=LLM(S_{gen},P_i;\theta_{gen})\), with \(T_{gen}=0.75\) and \(p_{gen}=0.95\). | `llm_prompts.py`, `TASK_SYNTHETIC_TEXT`; `router.llm_params.synthetic_text_generation`. | OK |
 | `EXEC` | Generated text feasibility | Accept generated text only if it is non-empty, not the reference, not a refusal phrase, and \(f_1\ge\tau_{gen}^{min}\). Initialization also enforces duplicate and sentence-limit filters. | `generated_text_validation.validate_generated_text`; `generated_text_validation.tau_gen_min=0.05`. | OK |
@@ -183,7 +186,7 @@ hyperparameter rows.
 | `PROMPT` | Render LLM calls | \(C_{render}^{Template}\) | 0 | Not configurable | Eliminates LLM prompt composition. | OK |
 | `ROUTER` | Router heuristics | \(h_\tau\) | all enabled | `router.heuristics.*`, `--router-heuristic` | Enables/disables each specified routing heuristic. | OK |
 | `ROUTER` | LLM model per task | \(LLM_\tau\) | `llama3.1:8b` | `router.task_models.*`, `--task-model` | Selects model for LLM semantic tasks. | OK |
-| `ROUTER` | Alternative LLM | \(LLM_{alt}\) | `qwen3.5:2b` | `ollama.alternative_model` | Available configurable model option. | OK |
+| `ROUTER` | LLM model options | \(LLM_{opts}\) | `llama3.1:8b`, `qwen3.5:2b`, `qwen3:4b-instruct-2507-q4_K_M`, `phi4-mini`, `ministral-3:3b` | `ollama.model_options`; routes use `router.task_models.*`, `router.phase_task_models.*.*`, `ollama.default_model` | Documented configurable tags; no strict whitelist. | OK |
 | `ROUTER` | Anchor short threshold | \(n_y^{short}\) | 6 words | `router.llm_params.semantic_anchor_extraction.short_word_threshold` | Chooses short vs long anchor extraction sampling. | OK |
 | `ROUTER` | Anchor short sampling | \((T,p_{top})\) | `(0.25, 0.90)` | `router.llm_params.semantic_anchor_extraction.short` | LLM anchor extraction for short references. | OK |
 | `ROUTER` | Anchor long sampling | \((T,p_{top})\) | `(0.20, 0.85)` | `router.llm_params.semantic_anchor_extraction.long` | LLM anchor extraction for longer references. | OK |
@@ -198,7 +201,7 @@ hyperparameter rows.
 | `EXEC` | Ollama host | \(host\) | `http://127.0.0.1:11434` | `ollama.host` | Ollama endpoint. | Runtime setting |
 | `EXEC` | Ollama timeout | \(timeout\) | 120 seconds | `ollama.timeout_seconds` | Request timeout. | Runtime setting |
 | `EXEC` | Ollama stream | \(stream\) | `false` | `ollama.stream` | Enforced single response, no streaming. | OK |
-| `EXEC` | Ollama thinking | \(think\) | `false` | `ollama.think` | Disables extra thinking payload when supported. | OK |
+| `EXEC` | Ollama thinking | \(think\) | `false` | `router.llm_params.*.thinking`, fallback `ollama.think` | Disables extra thinking payload by default; individual routed tasks can enable it. | OK |
 | `EXEC` | Speculative decoding | \(specdec\) | `false` | `ollama.speculative_decoding_enabled` | Blocked and documented as unsupported for this version. | OK |
 | `EXEC` | SBERT default model | \(E\) | `all-MiniLM-L6-v2` | `models.sbert.default`, `--bert-model` | Embeddings for objectives, prompts and validation. | OK |
 | `EXEC` | SBERT alternative | \(E_{alt}\) | `gte-small` | `models.sbert.alternatives.gte-small` | Configurable embedding model. | OK |

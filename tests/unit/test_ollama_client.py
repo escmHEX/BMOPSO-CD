@@ -31,8 +31,11 @@ def test_ollama_usage_metadata_converts_nanoseconds_and_token_counts():
 
 
 def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_path):
+    captured = {}
+
     class StubClient:
-        def chat(self, **_kwargs):
+        def chat(self, **kwargs):
+            captured["chat"] = kwargs
             return {
                 "message": {"content": "generated text"},
                 "total_duration": 1_000_000_000,
@@ -55,10 +58,13 @@ def test_ollama_chat_client_logs_usage_metadata_without_changing_content(tmp_pat
         user_prompt="user",
         options={"temperature": 0.75},
         response_format=None,
+        think=True,
     )
 
     assert text == "generated text"
+    assert captured["chat"]["think"] is True
     call = json.loads((tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert call["think"] is True
     assert call["ollamaTotalDurationSeconds"] == 1.0
     assert call["promptEvalCount"] == 5
     assert call["evalCount"] == 7
@@ -106,15 +112,17 @@ def test_ollama_chat_client_async_uses_async_client_and_logs(monkeypatch, tmp_pa
             user_prompt="user",
             options={"temperature": 0.75},
             response_format=None,
+            think=True,
         )
     )
 
     assert text == "async generated text"
     assert captured["init"] == {"host": "http://127.0.0.1:11434", "timeout": 120}
     assert captured["chat"]["stream"] is False
-    assert captured["chat"]["think"] is False
+    assert captured["chat"]["think"] is True
     assert captured["chat"]["format"] is None
     assert captured["closed"] is True
     call = json.loads((tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert call["think"] is True
     assert call["ollamaTotalDurationSeconds"] == 2.0
     assert call["message_count"] == 2

@@ -14,11 +14,17 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python -m spacy download en_core_web_sm
 ollama pull llama3.1:8b
 ollama pull qwen3.5:2b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+ollama pull phi4-mini
+ollama pull ministral-3:3b
 ```
 
 The setup commands are normally run once. Python dependencies stay inside
 `.venv`, Ollama models stay in the local Ollama store, and Hugging Face models
 stay in the user cache.
+
+Pull only the Ollama models you plan to use. `phi4-mini` requires Ollama 0.5.13
+or newer, and `ministral-3:3b` currently requires Ollama 0.13.1 pre-release.
 
 PPDB is also local. By default, the project builds a SQLite index once under the
 active Python environment:
@@ -72,7 +78,12 @@ More examples:
 ```powershell
 --set ollama.default_model=llama3.1:8b
 --set router.task_models.synthetic_text_generation=qwen3.5:2b
+--set router.task_models.semantic_pool_generation=qwen3:4b-instruct-2507-q4_K_M
+--set router.task_models.synthetic_text_generation=phi4-mini
 --set router.phase_task_models.initialization.synthetic_text_generation=qwen3.5:2b
+--set router.phase_task_models.optimization.synthetic_text_generation=ministral-3:3b
+--set router.llm_params.synthetic_text_generation.thinking=true
+--set router.llm_params.semantic_anchor_extraction.short.thinking=false
 --set router.heuristics.semantic_pool_generation=false
 --set models.sbert.default=all-MiniLM-L6-v2
 --set models.ppdb.source_path=data/ppdb/ppdb-2.0-s-all
@@ -87,6 +98,11 @@ More examples:
 Task-level LLM model overrides apply to every phase. Phase-task overrides apply
 only to the matching `RouteTask.operation_context` and inherit the task-level
 model when set to `null`.
+
+LLM thinking is disabled by default in every router LLM parameter bucket. A
+task-level `router.llm_params.<task>.thinking` value is passed as Ollama's
+per-call `think` field; if the task-level key is absent, the executor falls back
+to `ollama.think`.
 
 Speculative decoding is intentionally not supported in this version. The config
 contains a blocked flag so accidental activation fails during validation.

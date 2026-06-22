@@ -28,6 +28,12 @@ ollama:
   timeout_seconds: 120
   default_model: "llama3.1:8b"
   alternative_model: "qwen3.5:2b"
+  model_options:
+    - "llama3.1:8b"
+    - "qwen3.5:2b"
+    - "qwen3:4b-instruct-2507-q4_K_M"
+    - "phi4-mini"
+    - "ministral-3:3b"
   stream: false
   think: false
   speculative_decoding_enabled: false
@@ -92,14 +98,21 @@ router:
     disabled_default:
       temperature: 0.60
       top_p: 0.90
+      thinking: false
     semantic_anchor_extraction:
       short_word_threshold: 6
       short:
         temperature: 0.25
         top_p: 0.90
+        thinking: false
       long:
         temperature: 0.20
         top_p: 0.85
+        thinking: false
+    central_anchor_selection:
+      temperature: 0.60
+      top_p: 0.90
+      thinking: false
     semantic_pool_generation:
       low_evidence_word_threshold: 6
       low_evidence_anchor_threshold: 4
@@ -108,31 +121,39 @@ router:
           low_evidence:
             temperature: 0.68
             top_p: 0.95
+            thinking: false
           normal:
             temperature: 0.60
             top_p: 0.90
+            thinking: false
         topic:
           low_evidence:
             temperature: 0.42
             top_p: 0.90
+            thinking: false
           normal:
             temperature: 0.40
             top_p: 0.89
+            thinking: false
         action:
           low_evidence:
             temperature: 0.58
             top_p: 0.94
+            thinking: false
           normal:
             temperature: 0.50
             top_p: 0.90
+            thinking: false
     semantic_component_influence_candidates:
       temperature_start: 0.70
       temperature_end: 0.50
       top_p_start: 0.95
       top_p_end: 0.90
+      thinking: false
     synthetic_text_generation:
       temperature: 0.75
       top_p: 0.95
+      thinking: false
 
 semantic_components:
   order: ["role", "topic", "action"]

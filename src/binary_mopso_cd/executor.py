@@ -88,6 +88,7 @@ class SemanticTaskExecutor:
             user_prompt=user_prompt,
             options=options,
             response_format=response_format_for_task(task.semantic_task),
+            think=self._task_thinking(task),
         )
         return parse_task_result(task.semantic_task, raw)
 
@@ -105,8 +106,14 @@ class SemanticTaskExecutor:
             user_prompt=user_prompt,
             options=options,
             response_format=response_format_for_task(task.semantic_task),
+            think=self._task_thinking(task),
         )
         return parse_task_result(task.semantic_task, raw)
+
+    def _task_thinking(self, task: ExecutionTask) -> bool | str | None:
+        if "thinking" in task.alg_params:
+            return task.alg_params["thinking"]
+        return self.config.get("ollama.think", False)
 
     def save_caches(self) -> None:
         self.embedding_service.cache.save()

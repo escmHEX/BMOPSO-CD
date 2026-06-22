@@ -6,6 +6,9 @@ from binary_mopso_cd.router import (
     ALG_WORDNET_PPDB,
     TASK_ANCHORS,
     TASK_CENTRAL_ANCHOR_SELECTION,
+    TASK_INFLUENCE,
+    TASK_POOL_EXPANSION,
+    TASK_POOL_GENERATION,
     TASK_SYNTHETIC_TEXT,
     TASK_WORD_REPLACEMENT,
     RouteTask,
@@ -72,6 +75,64 @@ def test_router_task_model_override_still_applies_when_phase_model_is_null(test_
 
     assert execution.alg_name == ALG_LLM
     assert execution.alg_params["model"] == "qwen3.5:2b"
+
+
+def test_router_llm_tasks_default_to_thinking_false(test_config):
+    router = SemanticRouter(test_config)
+    tasks = [
+        RouteTask("anchors", "initialization", TASK_ANCHORS, {"reference_text": "Flood warning now"}),
+        RouteTask(
+            "central",
+            "initialization",
+            TASK_CENTRAL_ANCHOR_SELECTION,
+            {"referenceText": "Flood warning now", "semanticAnchors": {}, "numCentralAnchors": 4},
+        ),
+        RouteTask(
+            "pool",
+            "initialization",
+            TASK_POOL_GENERATION,
+            {
+                "component": "role",
+                "reference_text": "Flood warning now",
+                "central_anchor_count": 4,
+            },
+        ),
+        RouteTask(
+            "expand",
+            "initialization",
+            TASK_POOL_EXPANSION,
+            {
+                "component": "topic",
+                "reference_text": "Flood warning now",
+                "central_anchor_count": 4,
+            },
+        ),
+        RouteTask(
+            "influence",
+            "optimization",
+            TASK_INFLUENCE,
+            {"iteration": 0, "iterations": 10, "component": "action"},
+        ),
+        RouteTask("synthetic", "optimization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"}),
+    ]
+
+    for task in tasks:
+        execution = router.route(task)
+        assert execution.alg_name == ALG_LLM
+        assert execution.alg_params["thinking"] is False
+
+
+def test_router_task_thinking_override_only_affects_that_task(test_config):
+    test_config.set("router.llm_params.synthetic_text_generation.thinking", True)
+    router = SemanticRouter(test_config)
+
+    synthetic = router.route(
+        RouteTask("synthetic", "optimization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"})
+    )
+    anchors = router.route(RouteTask("anchors", "initialization", TASK_ANCHORS, {"reference_text": "Flood warning now"}))
+
+    assert synthetic.alg_params["thinking"] is True
+    assert anchors.alg_params["thinking"] is False
 
 
 def test_router_word_replacement_uses_distilbert_with_context(test_config):

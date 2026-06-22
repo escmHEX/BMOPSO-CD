@@ -8,6 +8,7 @@ from typing import Any
 
 
 NANOSECONDS_PER_SECOND = 1_000_000_000
+_UNSET = object()
 
 
 def response_value(response: Any, key: str, default: Any = None) -> Any:
@@ -98,6 +99,7 @@ class OllamaChatClient:
         semantic_task: str,
         model: str,
         options: dict[str, Any],
+        think: bool | str | None,
         response_format: Any,
         message_count: int,
         elapsed: float,
@@ -111,7 +113,7 @@ class OllamaChatClient:
                 "model": model,
                 "options": options,
                 "stream": False,
-                "think": self.think,
+                "think": think,
                 "format": "plain" if response_format is None else "structured",
                 "message_count": message_count,
                 "elapsed_seconds": elapsed,
@@ -119,6 +121,11 @@ class OllamaChatClient:
                 **ollama_usage_metadata(response),
             }
         )
+
+    def _resolve_think(self, think: Any) -> bool | str | None:
+        if think is _UNSET:
+            return self.think
+        return think
 
     def chat(
         self,
@@ -130,18 +137,20 @@ class OllamaChatClient:
         user_prompt: str,
         options: dict[str, Any],
         response_format: Any,
+        think: Any = _UNSET,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        resolved_think = self._resolve_think(think)
         started = time.perf_counter()
         response = self.client.chat(
             model=model,
             messages=messages,
             options=options,
             stream=False,
-            think=self.think,
+            think=resolved_think,
             format=response_format,
         )
         elapsed = time.perf_counter() - started
@@ -151,6 +160,7 @@ class OllamaChatClient:
             semantic_task=semantic_task,
             model=model,
             options=options,
+            think=resolved_think,
             response_format=response_format,
             message_count=len(messages),
             elapsed=elapsed,
@@ -175,6 +185,7 @@ class OllamaChatClient:
         user_prompt: str,
         options: dict[str, Any],
         response_format: Any,
+        think: Any = _UNSET,
     ) -> str:
         from ollama import AsyncClient
 
@@ -182,6 +193,7 @@ class OllamaChatClient:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        resolved_think = self._resolve_think(think)
         async_client = AsyncClient(host=self.host, timeout=self.timeout_seconds)
         try:
             started = time.perf_counter()
@@ -190,7 +202,7 @@ class OllamaChatClient:
                 messages=messages,
                 options=options,
                 stream=False,
-                think=self.think,
+                think=resolved_think,
                 format=response_format,
             )
             elapsed = time.perf_counter() - started
@@ -204,6 +216,7 @@ class OllamaChatClient:
             semantic_task=semantic_task,
             model=model,
             options=options,
+            think=resolved_think,
             response_format=response_format,
             message_count=len(messages),
             elapsed=elapsed,

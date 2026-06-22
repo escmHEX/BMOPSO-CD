@@ -59,6 +59,28 @@ def test_cli_set_updates_phase_task_model_override(test_config):
     assert config.get("router.phase_task_models.initialization.synthetic_text_generation") == "qwen3.5:2b"
 
 
+def test_cli_set_accepts_new_ollama_model_tags(test_config):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--reference-text",
+            "reference",
+            "--set",
+            "ollama.default_model=qwen3:4b-instruct-2507-q4_K_M",
+            "--set",
+            "router.task_models.synthetic_text_generation=phi4-mini",
+            "--set",
+            "router.phase_task_models.optimization.synthetic_text_generation=ministral-3:3b",
+        ]
+    )
+
+    config = apply_args(test_config, args)
+
+    assert config.get("ollama.default_model") == "qwen3:4b-instruct-2507-q4_K_M"
+    assert config.get("router.task_models.synthetic_text_generation") == "phi4-mini"
+    assert config.get("router.phase_task_models.optimization.synthetic_text_generation") == "ministral-3:3b"
+
+
 def test_cli_set_rejects_unknown_path(test_config):
     parser = build_parser()
     args = parser.parse_args(["--reference-text", "reference", "--set", "mopso.unknown=1"])

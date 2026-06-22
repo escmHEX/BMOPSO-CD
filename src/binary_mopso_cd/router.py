@@ -91,6 +91,8 @@ class SemanticRouter:
             else self.config.get(f"router.task_models.{task.semantic_task}") or self.config.get("ollama.default_model")
         )
         params["model"] = model
+        if "thinking" not in params:
+            params["thinking"] = self.config.get("ollama.think", False)
         return ExecutionTask(task.task_id, task.semantic_task, ALG_LLM, task.task_params, params)
 
     def _llm_params(self, task: RouteTask) -> dict[str, Any]:
@@ -138,7 +140,10 @@ class SemanticRouter:
                 float(base["temperature_start"]) - float(base["temperature_end"])
             ) * rho
             top_p = float(base["top_p_start"]) - (float(base["top_p_start"]) - float(base["top_p_end"])) * rho
-            return {"temperature": temperature, "top_p": top_p}
+            params = {"temperature": temperature, "top_p": top_p}
+            if "thinking" in base:
+                params["thinking"] = base["thinking"]
+            return params
         if task.semantic_task == TASK_SYNTHETIC_TEXT:
             return dict(self.config.get("router.llm_params.synthetic_text_generation"))
         return dict(self.config.get("router.llm_params.disabled_default"))
