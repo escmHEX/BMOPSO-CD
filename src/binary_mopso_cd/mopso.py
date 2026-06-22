@@ -235,7 +235,7 @@ class BinaryMOPSOCDEngine:
         self.pbest_updater = PBestUpdater(self.mopso.utility_weights)
         self.component_memory = ComponentMemoryIndex(self.components.order, executor.embedding_service)
         self.monitor = ObservationalMonitor(
-            enabled=bool(config.get("monitor.enabled", False)),
+            enabled=bool(config.get("monitor.enabled", True)),
             spacy_model=str(config.get("models.spacy.model", "en_core_web_sm")),
             embedding_service=executor.embedding_service,
         )

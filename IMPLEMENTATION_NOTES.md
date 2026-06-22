@@ -243,7 +243,7 @@ hyperparameter rows.
 | `SELECT` | Similarity upper bound | \(\tau_{max}\) | 0.94 | `selection.tau_max` | Maximum \(F_1\) for final selection. | OK |
 | `SELECT` | MMR lambda | \(\lambda_{MMR}\) | 0.35 | `selection.lambda_mmr` | Tradeoff between TOPSIS relevance and redundancy penalty. | OK |
 | `SELECT` | Entropy epsilon | \(\varepsilon\) | 0.0001 | `selection.epsilon` | Positive displacement for Entropy Method column shift. | OK |
-| `MONITOR` | Monitor enabled | \(mon\) | `false` | `monitor.enabled`, `--enable-monitor` | Observational metrics only; no optimizer feedback. | OK |
+| `MONITOR` | Monitor enabled | \(mon\) | `true` | `monitor.enabled` | Observational metrics only; no optimizer feedback. | OK |
 | `MONITOR` | KMeans clusters | \(k_{km}\) | `min(5,n)` | `EVOLMD_MO_KMEANS_CLUSTERS` | Fixed EVOLMD-MO-compatible external inertia setting. | OK |
 | `CHECKPOINT` | Checkpoint enabled | \(ckpt\) | `false` | `checkpoint.enabled` | Deferred checkpoints disabled by default. | OK |
 | `CHECKPOINT` | Checkpoint interval | \(I_{ckpt}\) | 1 | `checkpoint.interval`, `--checkpoint-every` | Save cadence when checkpoints are enabled. | OK |

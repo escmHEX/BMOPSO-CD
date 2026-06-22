@@ -54,10 +54,11 @@ def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
     assert int(row["archive_prune_count"]) >= 0
 
 
-def test_reduced_monitor_run_observes_without_decision_feedback(test_config, tmp_path):
+def test_reduced_monitor_run_observes_by_default_without_decision_feedback(test_config, tmp_path):
     test_config.set("experiment.n", 2)
     test_config.set("experiment.iterations", 1)
-    test_config.set("monitor.enabled", True)
+    test_config.set("mopso.p_anchor_enabled", False)
+    assert test_config.get("monitor.enabled") is True
     outdir = run_with_config(test_config, tmp_path, "monitor")
     assert (outdir / "monitor_metrics.csv").exists()
     with (outdir / "monitor_metrics.csv").open("r", encoding="utf-8") as handle:

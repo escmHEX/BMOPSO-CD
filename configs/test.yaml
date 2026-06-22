@@ -28,4 +28,4 @@ selection:
   k: 2
 
 monitor:
-  enabled: false
+  enabled: true

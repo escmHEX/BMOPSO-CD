@@ -191,4 +191,4 @@ selection:
   epsilon: 0.0001
 
 monitor:
-  enabled: false
+  enabled: true

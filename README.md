@@ -78,7 +78,6 @@ More examples:
 --set models.ppdb.source_path=data/ppdb/ppdb-2.0-s-all
 --set models.ppdb.index_path=.venv/var/binary_mopso_cd/ppdb_index.sqlite
 --set experiment.frozen_components='["role","topic"]'
---set monitor.enabled=true
 --set selection.enabled=false
 --set checkpoint.enabled=true
 --set checkpoint.interval=1
@@ -112,7 +111,7 @@ Each run writes an EVOLMD-MO-style folder under `exec/<timestamp>/` containing:
 - `runtime.log`
 - `llm_calls.jsonl`
 - `cost_metrics.json`
-- `monitor_metrics.csv` when `monitor.enabled=true`
+- `monitor_metrics.csv` by default; set `monitor.enabled=false` to disable it
 - `archive_history.jsonl`
 - `checkpoints/generation_*.json` when checkpointing is enabled
 

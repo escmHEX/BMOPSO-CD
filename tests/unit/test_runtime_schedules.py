@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.router import TASK_INFLUENCE, RouteTask, SemanticRouter
 from binary_mopso_cd.settings import MOPSOSettings, ParallelismSettings
 from binary_mopso_cd.utils import progress_ratio
@@ -67,6 +70,12 @@ def test_parallelism_defaults_match_strategy(test_config):
     assert settings.enabled is True
     assert settings.particle_update_max_concurrent == 10
     assert settings.initial_text_generation_max_concurrent == 10
+
+
+def test_monitor_is_enabled_by_default_in_repo_configs():
+    for path in [None, Path("configs/minimal.yaml"), Path("configs/test.yaml")]:
+        config = RuntimeConfig.load(path)
+        assert config.get("monitor.enabled") is True
 
 
 def test_parallelism_settings_validation(test_config):

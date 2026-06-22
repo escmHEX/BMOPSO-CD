@@ -15,4 +15,4 @@ selection:
   k: 1
 
 monitor:
-  enabled: false
+  enabled: true
