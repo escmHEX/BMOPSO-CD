@@ -24,6 +24,31 @@ def response_message_content(response: Any) -> str:
     return str(getattr(message, "content", "") or "")
 
 
+def response_message_thinking(response: Any) -> str:
+    message = response_value(response, "message", {})
+    if isinstance(message, dict):
+        return str(message.get("thinking") or "")
+    return str(getattr(message, "thinking", "") or "")
+
+
+def strip_content_thinking_tags(content: str, start_tag: str = "<think>", end_tag: str = "</think>") -> str:
+    if not start_tag or start_tag not in content:
+        return content
+    pieces: list[str] = []
+    position = 0
+    while True:
+        start = content.find(start_tag, position)
+        if start < 0:
+            pieces.append(content[position:])
+            break
+        pieces.append(content[position:start])
+        end = content.find(end_tag, start + len(start_tag)) if end_tag else -1
+        if end < 0:
+            break
+        position = end + len(end_tag)
+    return "".join(pieces).strip()
+
+
 def seconds_from_nanoseconds(value: Any) -> float | None:
     try:
         number = float(value)
@@ -82,6 +107,7 @@ class OllamaChatClient:
         host: str,
         timeout_seconds: int = 120,
         think: bool | str | None = False,
+        model_profiles: dict[str, dict[str, Any]] | None = None,
         logger: LLMCallLogger | None = None,
     ):
         from ollama import Client
@@ -89,8 +115,31 @@ class OllamaChatClient:
         self.host = host
         self.timeout_seconds = timeout_seconds
         self.think = think
+        self.model_profiles = model_profiles or {}
         self.client = Client(host=host, timeout=timeout_seconds)
         self.logger = logger or LLMCallLogger(None)
+
+    def _model_profile(self, model: str) -> dict[str, Any]:
+        profile = dict(getattr(self, "model_profiles", {}).get("default", {}))
+        model_profile = getattr(self, "model_profiles", {}).get(model, {})
+        for key, value in model_profile.items():
+            if isinstance(value, dict) and isinstance(profile.get(key), dict):
+                profile[key] = {**profile[key], **value}
+            else:
+                profile[key] = value
+        return profile
+
+    def _normalize_content(self, model: str, content: str) -> str:
+        response_thinking = self._model_profile(model).get("response_thinking", {})
+        if not isinstance(response_thinking, dict):
+            return content
+        if not bool(response_thinking.get("strip_content_tags", False)):
+            return content
+        return strip_content_thinking_tags(
+            content,
+            str(response_thinking.get("start_tag", "<think>")),
+            str(response_thinking.get("end_tag", "</think>")),
+        )
 
     def _log_call(
         self,
@@ -101,11 +150,13 @@ class OllamaChatClient:
         options: dict[str, Any],
         think: bool | str | None,
         response_format: Any,
-        message_count: int,
+        messages: list[dict[str, str]],
         elapsed: float,
         content: str,
+        raw_content: str,
         response: Any,
     ) -> None:
+        thinking = response_message_thinking(response)
         self.logger.log(
             {
                 "task_id": task_id,
@@ -115,9 +166,15 @@ class OllamaChatClient:
                 "stream": False,
                 "think": think,
                 "format": "plain" if response_format is None else "structured",
-                "message_count": message_count,
+                "message_count": len(messages),
+                "message_roles": [message["role"] for message in messages],
+                "system_prompt_chars": len(messages[0]["content"]) if messages else 0,
+                "user_prompt_chars": len(messages[1]["content"]) if len(messages) > 1 else 0,
                 "elapsed_seconds": elapsed,
                 "content_chars": len(str(content)),
+                "raw_content_chars": len(str(raw_content)),
+                "thinking_chars": len(thinking),
+                "content_thinking_stripped": raw_content != content,
                 **ollama_usage_metadata(response),
             }
         )
@@ -154,7 +211,8 @@ class OllamaChatClient:
             format=response_format,
         )
         elapsed = time.perf_counter() - started
-        content = response_message_content(response)
+        raw_content = response_message_content(response)
+        content = self._normalize_content(model, raw_content)
         self._log_call(
             task_id=task_id,
             semantic_task=semantic_task,
@@ -162,9 +220,10 @@ class OllamaChatClient:
             options=options,
             think=resolved_think,
             response_format=response_format,
-            message_count=len(messages),
+            messages=messages,
             elapsed=elapsed,
             content=content,
+            raw_content=raw_content,
             response=response,
         )
         text = str(content).strip()
@@ -210,7 +269,8 @@ class OllamaChatClient:
             close_result = async_client.close()
             if inspect.isawaitable(close_result):
                 await close_result
-        content = response_message_content(response)
+        raw_content = response_message_content(response)
+        content = self._normalize_content(model, raw_content)
         self._log_call(
             task_id=task_id,
             semantic_task=semantic_task,
@@ -218,9 +278,10 @@ class OllamaChatClient:
             options=options,
             think=resolved_think,
             response_format=response_format,
-            message_count=len(messages),
+            messages=messages,
             elapsed=elapsed,
             content=content,
+            raw_content=raw_content,
             response=response,
         )
         text = str(content).strip()

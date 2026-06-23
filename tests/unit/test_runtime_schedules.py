@@ -55,14 +55,14 @@ def test_checkpoint_interval_validation_only_when_enabled(test_config):
 
 def test_mopso_default_hyperparameters_match_strategy(test_config):
     settings = MOPSOSettings.from_config(test_config)
-    assert settings.archive_multiplier == 1.0
-    assert settings.kcand == 7
+    assert settings.archive_multiplier == 0.7
+    assert settings.kcand == 6
     assert settings.alpha == 1.0
-    assert settings.p_tur_max == 0.07
+    assert settings.p_tur_max == 0.08
     assert settings.p_tur_min == 0.02
     assert settings.p_anchor_enabled is True
     assert settings.p_anchor_min == 0.05
-    assert settings.p_anchor_max == 0.50
+    assert settings.p_anchor_max == 0.40
 
 
 def test_parallelism_defaults_match_strategy(test_config):

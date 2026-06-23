@@ -319,7 +319,7 @@ def test_mopso_influence_params_use_component_spec_and_strategy_fields(test_conf
         generation=1,
     )
 
-    assert params["numCandidates"] == 7
+    assert params["numCandidates"] == 6
     assert params["componentName"] == "action"
     assert params["componentDefinition"] == (
         "Communicative intent or discourse operation that indicates how the message communicates information. "
@@ -359,7 +359,7 @@ def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp
     assert params["targetSpan"] == [7, 13]
     assert params["targetWordLeftTokens"] == 1
     assert params["targetWordRightTokens"] == 1
-    assert params["maxVariants"] == 7
+    assert params["maxVariants"] == 6
     assert params["target_index"] == 1
 
 
@@ -426,7 +426,7 @@ def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_confi
     )
 
     assert engine._anchor_inclusion_probability(1) == pytest.approx(0.05)
-    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.50)
+    assert engine._anchor_inclusion_probability(3) == pytest.approx(0.40)
 
 
 def test_mopso_update_uses_anchor_override_when_probability_event_occurs(test_config, tmp_path):

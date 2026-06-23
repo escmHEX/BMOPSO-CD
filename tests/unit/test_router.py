@@ -167,11 +167,31 @@ def test_validate_rejects_task_thinking_true_for_unknown_model(test_config):
         test_config.validate()
 
 
-def test_validate_allows_task_thinking_true_for_compatible_model(test_config):
-    test_config.set("router.task_models.synthetic_text_generation", "qwen3.5:2b")
-    test_config.set("router.task_thinking.synthetic_text_generation", True)
+@pytest.mark.parametrize(
+    "model",
+    [
+        "qwen3.5:2b",
+        "qwen3:4b-instruct-2507-q4_K_M",
+        "gemma4:e4b",
+        "qwen3.5:4b",
+        "qwen3.5:9b",
+        "lfm2.5:8b",
+    ],
+)
+@pytest.mark.parametrize("thinking", [True, "low", "medium", "high"])
+def test_validate_allows_task_thinking_for_compatible_models(test_config, model, thinking):
+    test_config.set("router.task_models.synthetic_text_generation", model)
+    test_config.set("router.task_thinking.synthetic_text_generation", thinking)
 
     test_config.validate()
+
+
+def test_validate_rejects_unknown_task_thinking_value(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "qwen3.5:4b")
+    test_config.set("router.task_thinking.synthetic_text_generation", "maximum")
+
+    with pytest.raises(ValueError, match="must be false, true, null, low, medium, or high"):
+        test_config.validate()
 
 
 def test_validate_allows_task_thinking_false_for_incompatible_model(test_config):
@@ -202,8 +222,8 @@ def test_router_word_replacement_uses_default_kcand_when_missing(test_config):
     )
     execution = router.route(task)
     assert execution.alg_name == ALG_DISTILBERT
-    assert execution.alg_params["max_variants"] == 7
-    assert execution.alg_params["preliminary_top_k"] == 21
+    assert execution.alg_params["max_variants"] == 6
+    assert execution.alg_params["preliminary_top_k"] == 18
 
 
 def test_router_word_replacement_accepts_strategy_context_fields(test_config):

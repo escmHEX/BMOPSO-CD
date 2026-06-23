@@ -17,6 +17,10 @@ ollama pull qwen3.5:2b
 ollama pull qwen3:4b-instruct-2507-q4_K_M
 ollama pull phi4-mini
 ollama pull ministral-3:3b
+ollama pull gemma4:e4b
+ollama pull qwen3.5:4b
+ollama pull qwen3.5:9b
+ollama pull lfm2.5:8b
 ```
 
 The setup commands are normally run once. Python dependencies stay inside
@@ -25,6 +29,7 @@ stay in the user cache.
 
 Pull only the Ollama models you plan to use. `phi4-mini` requires Ollama 0.5.13
 or newer, and `ministral-3:3b` currently requires Ollama 0.13.1 pre-release.
+Local contract checks for this implementation were run with Ollama 0.30.8.
 
 PPDB is also local. By default, the project builds a SQLite index once under the
 active Python environment:
@@ -80,9 +85,14 @@ More examples:
 --set router.task_models.synthetic_text_generation=qwen3.5:2b
 --set router.task_models.semantic_pool_generation=qwen3:4b-instruct-2507-q4_K_M
 --set router.task_models.synthetic_text_generation=phi4-mini
+--set router.task_models.synthetic_text_generation=gemma4:e4b
+--set router.task_models.semantic_anchor_extraction=qwen3.5:4b
+--set router.task_models.central_anchor_selection=qwen3.5:9b
+--set router.task_models.semantic_pool_generation=lfm2.5:8b
 --set router.phase_task_models.initialization.synthetic_text_generation=qwen3.5:2b
 --set router.phase_task_models.optimization.synthetic_text_generation=ministral-3:3b
 --set router.llm_params.synthetic_text_generation.thinking=true
+--set router.llm_params.synthetic_text_generation.thinking=medium
 --set router.llm_params.semantic_anchor_extraction.short.thinking=false
 --set router.heuristics.semantic_pool_generation=false
 --set models.sbert.default=all-MiniLM-L6-v2
@@ -102,7 +112,17 @@ model when set to `null`.
 LLM thinking is disabled by default in every router LLM parameter bucket. A
 task-level `router.llm_params.<task>.thinking` value is passed as Ollama's
 per-call `think` field; if the task-level key is absent, the executor falls back
-to `ollama.think`.
+to `ollama.think`. Accepted values are `false`, `true`, `null`, `low`,
+`medium`, and `high`; enabled thinking is rejected during config validation for
+models declared without thinking support in `ollama.model_capabilities`.
+
+The Ollama client uses the standard Chat request for every model:
+`messages=[system,user]`, `options.temperature`, `options.top_p`, `format` for
+structured JSON tasks, `stream=false`, and an explicit per-call `think`. Model
+differences that affect response handling belong in `ollama.model_profiles`.
+`lfm2.5:8b` is profiled to strip in-band `<think>...</think>` content from
+responses because local verification showed that tag can appear in
+`message.content` even when `think=false`.
 
 Speculative decoding is intentionally not supported in this version. The config
 contains a blocked flag so accidental activation fails during validation.

@@ -9,6 +9,9 @@ import yaml
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
+DISABLED_THINKING_STRINGS = {"", "false", "0", "no", "none", "null"}
+ENABLED_THINKING_STRINGS = {"true", "1", "yes"}
+OLLAMA_THINKING_LEVELS = {"low", "medium", "high"}
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -89,6 +92,17 @@ class RuntimeConfig:
             capabilities[str(model)] = dict(values)
         return capabilities
 
+    def ollama_model_profiles(self) -> dict[str, dict[str, Any]]:
+        raw_profiles = self.get("ollama.model_profiles", {})
+        if not isinstance(raw_profiles, dict):
+            raise ValueError("ollama.model_profiles must be a mapping")
+        profiles: dict[str, dict[str, Any]] = {}
+        for model, values in raw_profiles.items():
+            if not isinstance(values, dict):
+                raise ValueError(f"ollama.model_profiles.{model} must be a mapping")
+            profiles[str(model)] = deepcopy(values)
+        return profiles
+
     def model_supports_thinking(self, model: str) -> bool:
         capabilities = self.ollama_model_capabilities()
         if model not in capabilities:
@@ -116,27 +130,46 @@ class RuntimeConfig:
         if value is None:
             return False
         if isinstance(value, str):
-            return value.strip().lower() not in {"", "false", "0", "no", "none", "null"}
+            return value.strip().lower() not in DISABLED_THINKING_STRINGS
         return bool(value)
 
-    def _thinking_values(self, value: Any) -> list[Any]:
+    def _validate_thinking_value(self, value: Any, path: str) -> None:
+        if isinstance(value, bool) or value is None:
+            return
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in DISABLED_THINKING_STRINGS | ENABLED_THINKING_STRINGS | OLLAMA_THINKING_LEVELS:
+                return
+        raise ValueError(f"{path} must be false, true, null, low, medium, or high")
+
+    def _thinking_entries(self, value: Any, path: str) -> list[tuple[str, Any]]:
         if isinstance(value, dict):
-            values: list[Any] = []
+            entries: list[tuple[str, Any]] = []
             for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
                 if key == "thinking":
-                    values.append(child)
+                    entries.append((child_path, child))
                 else:
-                    values.extend(self._thinking_values(child))
-            return values
+                    entries.extend(self._thinking_entries(child, child_path))
+            return entries
         if isinstance(value, list):
-            values: list[Any] = []
-            for child in value:
-                values.extend(self._thinking_values(child))
-            return values
+            entries: list[tuple[str, Any]] = []
+            for index, child in enumerate(value):
+                entries.extend(self._thinking_entries(child, f"{path}[{index}]"))
+            return entries
         return []
 
+    def _thinking_values(self, value: Any) -> list[Any]:
+        return [entry_value for _, entry_value in self._thinking_entries(value, "")]
+
+    def _task_llm_params_thinking_entries(self, semantic_task: str) -> list[tuple[str, Any]]:
+        return self._thinking_entries(
+            self.get(f"router.llm_params.{semantic_task}", {}),
+            f"router.llm_params.{semantic_task}",
+        )
+
     def _task_llm_params_thinking(self, semantic_task: str) -> Any:
-        values = self._thinking_values(self.get(f"router.llm_params.{semantic_task}", {}))
+        values = [value for _, value in self._task_llm_params_thinking_entries(semantic_task)]
         if any(self._thinking_enabled(value) for value in values):
             return True
         if values:
@@ -159,6 +192,11 @@ class RuntimeConfig:
         task_thinking = self.get("router.task_thinking", {})
         if not isinstance(task_thinking, dict):
             raise ValueError("router.task_thinking must be a mapping")
+        self._validate_thinking_value(self.get("ollama.think", False), "ollama.think")
+        for semantic_task, thinking_value in task_thinking.items():
+            self._validate_thinking_value(thinking_value, f"router.task_thinking.{semantic_task}")
+        for thinking_path, thinking_value in self._thinking_entries(self.get("router.llm_params", {}), "router.llm_params"):
+            self._validate_thinking_value(thinking_value, thinking_path)
         for semantic_task in task_models:
             thinking = self.resolved_task_thinking(str(semantic_task), self._task_llm_params_thinking(str(semantic_task)))
             if not self._thinking_enabled(thinking):
@@ -333,6 +371,8 @@ class RuntimeConfig:
             raise ValueError("selection.tau_min must not exceed selection.tau_max")
         if str(self.get("logging.level", "INFO")).upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("logging.level must be a valid Python logging level")
+        self.ollama_model_capabilities()
+        self.ollama_model_profiles()
         if bool(self.get("ollama.speculative_decoding_enabled", False)):
             raise NotImplementedError(
                 "Speculative decoding is intentionally blocked until Ollama exposes "

@@ -62,6 +62,7 @@ def test_pool_generation_messages_include_component_instruction():
             "domain": DOMAIN,
             "anchors": {"entities": ["bridge"], "topics": ["flooded roads"], "actions": ["request support"]},
             "component_additional_instruction": "Return message-sender roles.",
+            "max_words_by_component": {"role": 6},
         },
     )
 
@@ -69,8 +70,13 @@ def test_pool_generation_messages_include_component_instruction():
     assert '{"items": ["...", "..."]}' in system
     assert "Component to generate:\nroles" in user
     assert "Required number of items:\n2" in user
+    assert "Maximum words per item:\n6" in user
     assert '"entities": [\n    "bridge"\n  ]' in user
-    assert user.endswith("Additional instruction:\nReturn message-sender roles.")
+    assert user.endswith(
+        "Additional instruction:\n"
+        "Return message-sender roles.\n"
+        "Every item must stay within the maximum words per item."
+    )
 
 
 def test_central_anchor_selection_messages_match_strategy():
@@ -97,7 +103,7 @@ Select a compact set of central anchors from the reference text and the provided
 
 Output format:
 Return only valid JSON with exactly this structure:
-{"central_anchors": ["...", "..."]}
+{"central_anchors": ["...", "...", "...", "..."]}
 
 Rules:
 - Select only anchors that preserve the main meaning of the reference text.
@@ -106,7 +112,7 @@ Rules:
 - Avoid generic domain terms unless they are essential.
 - Avoid redundant anchors.
 - Do not invent entities, events, resources, or topics.
-- Return between 3 and 5 anchors.
+- Return the requested number of anchors when enough nonredundant anchors are available; never return fewer than 3 or more than 5 anchors.
 - Do not include explanations, markdown, numbering, or extra keys."""
     assert user == (
         "Reference text:\n"
@@ -239,13 +245,19 @@ def test_pool_expansion_messages_include_existing_items():
             "anchors": {"actions": ["request support"]},
             "existing": ["request help", "warn neighbors"],
             "component_additional_instruction": "Return communicative intents.",
+            "max_words_by_component": {"action": 6},
         },
     )
 
     assert "Component to expand:\nactions" in user
     assert "Required number of new items:\n3" in user
+    assert "Maximum words per item:\n6" in user
     assert "Existing items to avoid:\n[\n  \"request help\",\n  \"warn neighbors\"\n]" in user
-    assert user.endswith("Additional instruction:\nReturn communicative intents.")
+    assert user.endswith(
+        "Additional instruction:\n"
+        "Return communicative intents.\n"
+        "Every item must stay within the maximum words per item."
+    )
 
 
 def test_pool_schema_and_parser_prefer_items_object_but_accept_legacy_array():

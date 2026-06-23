@@ -35,6 +35,10 @@ ollama:
     - "qwen3:4b-instruct-2507-q4_K_M"
     - "phi4-mini"
     - "ministral-3:3b"
+    - "gemma4:e4b"
+    - "qwen3.5:4b"
+    - "qwen3.5:9b"
+    - "lfm2.5:8b"
   model_capabilities:
     llama3:
       thinking: false
@@ -48,6 +52,23 @@ ollama:
       thinking: false
     ministral-3:3b:
       thinking: false
+    gemma4:e4b:
+      thinking: true
+    qwen3.5:4b:
+      thinking: true
+    qwen3.5:9b:
+      thinking: true
+    lfm2.5:8b:
+      thinking: true
+  model_profiles:
+    default:
+      response_thinking:
+        strip_content_tags: false
+        start_tag: "<think>"
+        end_tag: "</think>"
+    lfm2.5:8b:
+      response_thinking:
+        strip_content_tags: true
   stream: false
   think: false
   speculative_decoding_enabled: false

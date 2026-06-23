@@ -66,19 +66,22 @@ def test_cli_set_accepts_new_ollama_model_tags(test_config):
             "--reference-text",
             "reference",
             "--set",
-            "ollama.default_model=qwen3:4b-instruct-2507-q4_K_M",
+            "ollama.default_model=gemma4:e4b",
             "--set",
-            "router.task_models.synthetic_text_generation=phi4-mini",
+            "router.task_models.semantic_anchor_extraction=qwen3.5:4b",
             "--set",
-            "router.phase_task_models.optimization.synthetic_text_generation=ministral-3:3b",
+            "router.task_models.synthetic_text_generation=lfm2.5:8b",
+            "--set",
+            "router.phase_task_models.optimization.synthetic_text_generation=qwen3.5:9b",
         ]
     )
 
     config = apply_args(test_config, args)
 
-    assert config.get("ollama.default_model") == "qwen3:4b-instruct-2507-q4_K_M"
-    assert config.get("router.task_models.synthetic_text_generation") == "phi4-mini"
-    assert config.get("router.phase_task_models.optimization.synthetic_text_generation") == "ministral-3:3b"
+    assert config.get("ollama.default_model") == "gemma4:e4b"
+    assert config.get("router.task_models.semantic_anchor_extraction") == "qwen3.5:4b"
+    assert config.get("router.task_models.synthetic_text_generation") == "lfm2.5:8b"
+    assert config.get("router.phase_task_models.optimization.synthetic_text_generation") == "qwen3.5:9b"
 
 
 def test_cli_set_rejects_unknown_path(test_config):

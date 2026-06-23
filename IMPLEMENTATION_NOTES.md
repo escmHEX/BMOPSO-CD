@@ -16,6 +16,14 @@ Ollama usage, and external observational metrics.
 - Ollama thinking is disabled by default in every router LLM parameter bucket.
   Task-level `thinking` is passed as the per-call Ollama `think` value, with
   `ollama.think` kept as the compatibility fallback when a routed task lacks it.
+  Accepted configured values are `false`, `true`, `null`, `low`, `medium`, and
+  `high`.
+- The Ollama Chat contract is uniform across configured models: messages are
+  sent as system/user chat roles, sampling uses `options.temperature` and
+  `options.top_p`, JSON tasks use `format`, calls use `stream=false`, and
+  thinking uses the per-call `think` field. Model-specific response differences
+  are represented through declarative `ollama.model_profiles`; `lfm2.5:8b`
+  strips in-band `<think>...</think>` tags observed with `think=false`.
 - SBERT embeddings are batched and cached with keys that include text type,
   model alias, config version, and canonical text.
 - Heavy resources are service-owned and loaded once per executor process.
@@ -155,7 +163,7 @@ hyperparameter rows.
 | `PBEST` | Utility tie-break | \(U(x)=w_1\tilde f_1(x)+w_2\tilde f_2(x)\). With \(w_1=w_2=0.5\), \(U(x)=\frac{f_1(x)+1+f_2(x)}{4}\). Ties keep previous pbest. | `mopso.utility`; `mopso.utility_weights`. | OK |
 | `TURB` | DistilBERT preliminary top-k | \(M_{tur}=3K_{cand}\). | `models.distilbert.top_k_multiplier=3`; router sends `preliminaryTopK`. | OK |
 | `TURB` | DistilBERT route condition | Use DistilBERT if \(L_w\ge1\land R_w\ge1\); otherwise use WordNet first with PPDB fallback. | `router._route_word_replacement`. | OK |
-| `TURB` | Variant count | \(\lvert C_K\rvert\le K_{cand}\). | `TurbulenceService`; `mopso.kcand=7`. | OK |
+| `TURB` | Variant count | \(\lvert C_K\rvert\le K_{cand}\). | `TurbulenceService`; `mopso.kcand=6`. | OK |
 | `SELECT` | Similarity filter | \(\mathcal{C}=\{x_i\in\mathcal{F}:\tau_{min}\le F_1(x_i)\le\tau_{max}\}\). | `rank_solutions`; `selection.tau_min`, `selection.tau_max`. | OK |
 | `SELECT` | Decision matrix | \(A=[a_{ij}]\in\mathbb{R}^{n_f\times2}\), \(a_{i1}=F_1(x_i)\), \(a_{i2}=F_2(x_i)\). | `rank_solutions`. | OK |
 | `SELECT` | Entropy column shift | \(\delta_j=\max(0,-\min_i a_{ij})+\varepsilon\), \(b_{ij}=a_{ij}+\delta_j\). | `entropy_weights`. | OK |
@@ -186,7 +194,7 @@ hyperparameter rows.
 | `PROMPT` | Render LLM calls | \(C_{render}^{Template}\) | 0 | Not configurable | Eliminates LLM prompt composition. | OK |
 | `ROUTER` | Router heuristics | \(h_\tau\) | all enabled | `router.heuristics.*`, `--router-heuristic` | Enables/disables each specified routing heuristic. | OK |
 | `ROUTER` | LLM model per task | \(LLM_\tau\) | `llama3.1:8b` | `router.task_models.*`, `--task-model` | Selects model for LLM semantic tasks. | OK |
-| `ROUTER` | LLM model options | \(LLM_{opts}\) | `llama3.1:8b`, `qwen3.5:2b`, `qwen3:4b-instruct-2507-q4_K_M`, `phi4-mini`, `ministral-3:3b` | `ollama.model_options`; routes use `router.task_models.*`, `router.phase_task_models.*.*`, `ollama.default_model` | Documented configurable tags; no strict whitelist. | OK |
+| `ROUTER` | LLM model options | \(LLM_{opts}\) | `llama3.1:8b`, `qwen3.5:2b`, `qwen3:4b-instruct-2507-q4_K_M`, `phi4-mini`, `ministral-3:3b`, `gemma4:e4b`, `qwen3.5:4b`, `qwen3.5:9b`, `lfm2.5:8b` | `ollama.model_options`; routes use `router.task_models.*`, `router.phase_task_models.*.*`, `ollama.default_model` | Documented configurable tags; no strict whitelist. | OK |
 | `ROUTER` | Anchor short threshold | \(n_y^{short}\) | 6 words | `router.llm_params.semantic_anchor_extraction.short_word_threshold` | Chooses short vs long anchor extraction sampling. | OK |
 | `ROUTER` | Anchor short sampling | \((T,p_{top})\) | `(0.25, 0.90)` | `router.llm_params.semantic_anchor_extraction.short` | LLM anchor extraction for short references. | OK |
 | `ROUTER` | Anchor long sampling | \((T,p_{top})\) | `(0.20, 0.85)` | `router.llm_params.semantic_anchor_extraction.long` | LLM anchor extraction for longer references. | OK |
@@ -228,7 +236,7 @@ hyperparameter rows.
 | `MOPSO` | Archive multiplier | \(A_{max}/N\) | 2 | `mopso.archive_multiplier` | Sets \(A_{max}=2N\). | OK |
 | `MOPSO` | Leader tournament size | \(q\) | 3 | `mopso.leader_tournament_size` | Tournament by crowding distance. | OK |
 | `MOPSO` | Max modified components | \(D_{max}\) | 1 | `mopso.dmax` | Caps changed active components per particle and generation. | OK |
-| `MOPSO` | Candidate variants | \(K_{cand}\) | 7 | `mopso.kcand` | Max variants from guided/turbulence operators. | OK |
+| `MOPSO` | Candidate variants | \(K_{cand}\) | 6 | `mopso.kcand` | Max variants from guided/turbulence operators. | OK |
 | `MOPSO` | Inertia endpoints | \(\omega_{max},\omega_{min}\) | `0.9`, `0.4` | `mopso.omega_max`, `mopso.omega_min` | Linear decreasing inertia. | OK |
 | `MOPSO` | Cognitive/social constants | \(c_1,c_2\) | `1.5`, `1.5` | `mopso.c1`, `mopso.c2` | Balance pbest and leader influence. | OK |
 | `MOPSO` | Velocity clamp | \(V_{max}\) | 4.0 | `mopso.vmax` | Bounds semantic velocity. | OK |

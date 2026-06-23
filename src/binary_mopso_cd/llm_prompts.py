@@ -71,7 +71,7 @@ Select a compact set of central anchors from the reference text and the provided
 
 Output format:
 Return only valid JSON with exactly this structure:
-{"central_anchors": ["...", "..."]}
+{"central_anchors": ["...", "...", "...", "..."]}
 
 Rules:
 - Select only anchors that preserve the main meaning of the reference text.
@@ -80,7 +80,7 @@ Rules:
 - Avoid generic domain terms unless they are essential.
 - Avoid redundant anchors.
 - Do not invent entities, events, resources, or topics.
-- Return between 3 and 5 anchors.
+- Return the requested number of anchors when enough nonredundant anchors are available; never return fewer than 3 or more than 5 anchors.
 - Do not include explanations, markdown, numbering, or extra keys."""
 
 SYSTEM_TEXT_GENERATION = """You are a plain-text generator for social media messages related to crises and emergencies.
@@ -205,6 +205,14 @@ def _pool_quantity(params: dict[str, Any], key: str) -> int:
     return int(params.get(key, params.get("quantity")))
 
 
+def _component_max_words(params: dict[str, Any], component: str) -> int | None:
+    configured = params.get("max_words_by_component")
+    if isinstance(configured, dict) and component in configured:
+        return int(configured[component])
+    value = params.get("max_words")
+    return None if value is None else int(value)
+
+
 def _first_param(params: dict[str, Any], *keys: str, default: Any = "") -> Any:
     for key in keys:
         value = params.get(key)
@@ -292,6 +300,7 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
     if semantic_task == TASK_POOL_GENERATION:
         component = str(params["component"])
         component_type = str(params.get("component_type") or component_type_label(component))
+        max_words = _component_max_words(params, component)
         additional_instruction = str(
             params.get("component_additional_instruction") or component_additional_instruction(component)
         )
@@ -306,15 +315,19 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
                 f"{component_type}\n\n"
                 "Required number of items:\n"
                 f"{_pool_quantity(params, 'required_items')}\n\n"
+                "Maximum words per item:\n"
+                f"{max_words if max_words is not None else 'not configured'}\n\n"
                 "Semantic anchors for support:\n"
                 f"{_json_block(params.get('anchors', {}))}\n\n"
                 "Additional instruction:\n"
-                f"{additional_instruction}"
+                f"{additional_instruction}\n"
+                f"Every item must stay within the maximum words per item."
             ),
         )
     if semantic_task == TASK_POOL_EXPANSION:
         component = str(params["component"])
         component_type = str(params.get("component_type") or component_type_label(component))
+        max_words = _component_max_words(params, component)
         additional_instruction = str(
             params.get("component_additional_instruction") or component_additional_instruction(component)
         )
@@ -329,12 +342,15 @@ def build_messages(semantic_task: str, params: dict[str, Any]) -> tuple[str, str
                 f"{component_type}\n\n"
                 "Required number of new items:\n"
                 f"{_pool_quantity(params, 'required_new_items')}\n\n"
+                "Maximum words per item:\n"
+                f"{max_words if max_words is not None else 'not configured'}\n\n"
                 "Existing items to avoid:\n"
                 f"{_json_block(params.get('existing', []))}\n\n"
                 "Semantic anchors for support:\n"
                 f"{_json_block(params.get('anchors', {}))}\n\n"
                 "Additional instruction:\n"
-                f"{additional_instruction}"
+                f"{additional_instruction}\n"
+                f"Every item must stay within the maximum words per item."
             ),
         )
     if semantic_task == TASK_INFLUENCE:
