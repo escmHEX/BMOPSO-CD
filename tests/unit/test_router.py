@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from binary_mopso_cd.router import (
     ALG_DISTILBERT,
     ALG_LLM,
@@ -133,6 +135,50 @@ def test_router_task_thinking_override_only_affects_that_task(test_config):
 
     assert synthetic.alg_params["thinking"] is True
     assert anchors.alg_params["thinking"] is False
+
+
+def test_router_task_thinking_config_path_overrides_task_llm_params(test_config):
+    test_config.set("router.llm_params.synthetic_text_generation.thinking", False)
+    test_config.set("router.task_thinking.synthetic_text_generation", True)
+    router = SemanticRouter(test_config)
+
+    synthetic = router.route(
+        RouteTask("synthetic", "optimization", TASK_SYNTHETIC_TEXT, {"prompt": "x", "reference_text": "y"})
+    )
+    anchors = router.route(RouteTask("anchors", "initialization", TASK_ANCHORS, {"reference_text": "Flood warning now"}))
+
+    assert synthetic.alg_params["thinking"] is True
+    assert anchors.alg_params["thinking"] is False
+
+
+def test_validate_rejects_task_thinking_true_for_incompatible_model(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "llama3.1:8b")
+    test_config.set("router.task_thinking.synthetic_text_generation", True)
+
+    with pytest.raises(ValueError, match="does not support thinking"):
+        test_config.validate()
+
+
+def test_validate_rejects_task_thinking_true_for_unknown_model(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "custom-local-model")
+    test_config.set("router.task_thinking.synthetic_text_generation", True)
+
+    with pytest.raises(ValueError, match="not declared in ollama.model_capabilities"):
+        test_config.validate()
+
+
+def test_validate_allows_task_thinking_true_for_compatible_model(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "qwen3.5:2b")
+    test_config.set("router.task_thinking.synthetic_text_generation", True)
+
+    test_config.validate()
+
+
+def test_validate_allows_task_thinking_false_for_incompatible_model(test_config):
+    test_config.set("router.task_models.synthetic_text_generation", "llama3.1:8b")
+    test_config.set("router.task_thinking.synthetic_text_generation", False)
+
+    test_config.validate()
 
 
 def test_router_word_replacement_uses_distilbert_with_context(test_config):

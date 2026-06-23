@@ -72,6 +72,107 @@ class RuntimeConfig:
             raise ValueError(f"Unknown configuration path: {path}")
         self.set(path, value)
 
+    def ollama_model_options(self) -> list[str]:
+        raw_options = self.get("ollama.model_options", [])
+        if not isinstance(raw_options, list):
+            raise ValueError("ollama.model_options must be a list")
+        return [str(model).strip() for model in raw_options if str(model).strip()]
+
+    def ollama_model_capabilities(self) -> dict[str, dict[str, Any]]:
+        raw_capabilities = self.get("ollama.model_capabilities", {})
+        if not isinstance(raw_capabilities, dict):
+            raise ValueError("ollama.model_capabilities must be a mapping")
+        capabilities: dict[str, dict[str, Any]] = {}
+        for model, values in raw_capabilities.items():
+            if not isinstance(values, dict):
+                raise ValueError(f"ollama.model_capabilities.{model} must be a mapping")
+            capabilities[str(model)] = dict(values)
+        return capabilities
+
+    def model_supports_thinking(self, model: str) -> bool:
+        capabilities = self.ollama_model_capabilities()
+        if model not in capabilities:
+            raise ValueError(f"Model {model!r} is not declared in ollama.model_capabilities")
+        return bool(capabilities[model].get("thinking", False))
+
+    def resolved_task_model(self, semantic_task: str, operation_context: str | None = None) -> str:
+        if operation_context:
+            phase_model = self.get(f"router.phase_task_models.{operation_context}.{semantic_task}")
+            if phase_model is not None:
+                return str(phase_model)
+        return str(self.get(f"router.task_models.{semantic_task}") or self.get("ollama.default_model"))
+
+    def resolved_task_thinking(self, semantic_task: str, llm_params_thinking: Any = None) -> bool | str | None:
+        task_thinking = self.get(f"router.task_thinking.{semantic_task}")
+        if task_thinking is not None:
+            return task_thinking
+        if llm_params_thinking is not None:
+            return llm_params_thinking
+        return self.get("ollama.think", False)
+
+    def _thinking_enabled(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.strip().lower() not in {"", "false", "0", "no", "none", "null"}
+        return bool(value)
+
+    def _thinking_values(self, value: Any) -> list[Any]:
+        if isinstance(value, dict):
+            values: list[Any] = []
+            for key, child in value.items():
+                if key == "thinking":
+                    values.append(child)
+                else:
+                    values.extend(self._thinking_values(child))
+            return values
+        if isinstance(value, list):
+            values: list[Any] = []
+            for child in value:
+                values.extend(self._thinking_values(child))
+            return values
+        return []
+
+    def _task_llm_params_thinking(self, semantic_task: str) -> Any:
+        values = self._thinking_values(self.get(f"router.llm_params.{semantic_task}", {}))
+        if any(self._thinking_enabled(value) for value in values):
+            return True
+        if values:
+            return False
+        return self.get("ollama.think", False)
+
+    def _phase_contexts_for_task(self, semantic_task: str) -> list[str | None]:
+        contexts: list[str | None] = [None]
+        raw_phase_task_models = self.get("router.phase_task_models", {})
+        if isinstance(raw_phase_task_models, dict):
+            for context, task_models in raw_phase_task_models.items():
+                if isinstance(task_models, dict) and semantic_task in task_models:
+                    contexts.append(str(context))
+        return contexts
+
+    def validate_task_thinking_support(self) -> None:
+        task_models = self.get("router.task_models", {})
+        if not isinstance(task_models, dict):
+            raise ValueError("router.task_models must be a mapping")
+        task_thinking = self.get("router.task_thinking", {})
+        if not isinstance(task_thinking, dict):
+            raise ValueError("router.task_thinking must be a mapping")
+        for semantic_task in task_models:
+            thinking = self.resolved_task_thinking(str(semantic_task), self._task_llm_params_thinking(str(semantic_task)))
+            if not self._thinking_enabled(thinking):
+                continue
+            for context in self._phase_contexts_for_task(str(semantic_task)):
+                model = self.resolved_task_model(str(semantic_task), context)
+                try:
+                    supports_thinking = self.model_supports_thinking(model)
+                except ValueError as exc:
+                    raise ValueError(f"{model} for {semantic_task} is not declared in ollama.model_capabilities") from exc
+                if not supports_thinking:
+                    context_label = f" in {context}" if context else ""
+                    raise ValueError(f"{model} for {semantic_task}{context_label} does not support thinking")
+
     def as_dict(self) -> dict[str, Any]:
         return deepcopy(self.data)
 
@@ -237,3 +338,4 @@ class RuntimeConfig:
                 "Speculative decoding is intentionally blocked until Ollama exposes "
                 "a concrete supported option for this project."
             )
+        self.validate_task_thinking_support()

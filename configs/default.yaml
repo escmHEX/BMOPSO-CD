@@ -29,11 +29,25 @@ ollama:
   default_model: "llama3.1:8b"
   alternative_model: "qwen3.5:2b"
   model_options:
+    - "llama3"
     - "llama3.1:8b"
     - "qwen3.5:2b"
     - "qwen3:4b-instruct-2507-q4_K_M"
     - "phi4-mini"
     - "ministral-3:3b"
+  model_capabilities:
+    llama3:
+      thinking: false
+    llama3.1:8b:
+      thinking: false
+    qwen3.5:2b:
+      thinking: true
+    qwen3:4b-instruct-2507-q4_K_M:
+      thinking: true
+    phi4-mini:
+      thinking: false
+    ministral-3:3b:
+      thinking: false
   stream: false
   think: false
   speculative_decoding_enabled: false
@@ -87,6 +101,13 @@ router:
       semantic_pool_expansion: null
       semantic_component_influence_candidates: null
       synthetic_text_generation: null
+  task_thinking:
+    semantic_anchor_extraction: null
+    central_anchor_selection: null
+    semantic_pool_generation: null
+    semantic_pool_expansion: null
+    semantic_component_influence_candidates: null
+    synthetic_text_generation: null
   heuristics:
     semantic_anchor_extraction: true
     central_anchor_selection: true
