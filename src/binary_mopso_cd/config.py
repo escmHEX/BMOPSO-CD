@@ -227,9 +227,6 @@ class RuntimeConfig:
                 if not supports_thinking:
                     context_label = f" in {context}" if context else ""
                     raise ValueError(f"{model} for {semantic_task}{context_label} does not support thinking")
-                if str(semantic_task) not in self.model_validated_thinking_tasks(model):
-                    context_label = f" in {context}" if context else ""
-                    raise ValueError(f"{model} for {semantic_task}{context_label} is not validated for thinking")
 
     def as_dict(self) -> dict[str, Any]:
         return deepcopy(self.data)

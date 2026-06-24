@@ -171,11 +171,12 @@ def test_validate_rejects_task_thinking_true_for_unknown_model(test_config):
     "model",
     [
         "gemma4:e4b",
+        "qwen3.5:9b",
         "lfm2.5:8b",
     ],
 )
 @pytest.mark.parametrize("thinking", [True, "low", "medium", "high"])
-def test_validate_allows_task_thinking_for_validated_model_tasks(test_config, model, thinking):
+def test_validate_allows_task_thinking_for_models_that_support_thinking(test_config, model, thinking):
     test_config.set("router.task_models.semantic_pool_generation", model)
     test_config.set("router.task_thinking.semantic_pool_generation", thinking)
 
@@ -183,27 +184,19 @@ def test_validate_allows_task_thinking_for_validated_model_tasks(test_config, mo
 
 
 @pytest.mark.parametrize("thinking", [True, "low"])
-def test_validate_rejects_task_thinking_for_unvalidated_model_task(test_config, thinking):
-    test_config.set("router.task_models.semantic_pool_generation", "qwen3.5:9b")
-    test_config.set("router.task_thinking.semantic_pool_generation", thinking)
-
-    with pytest.raises(ValueError, match="not validated for thinking"):
-        test_config.validate()
-
-
-def test_validate_allows_task_thinking_for_validated_task_on_same_model(test_config):
-    test_config.set("router.task_models.semantic_anchor_extraction", "qwen3.5:9b")
-    test_config.set("router.task_thinking.semantic_anchor_extraction", "low")
+def test_validate_allows_task_thinking_for_supported_model_without_task_validation(test_config, thinking):
+    test_config.set("router.task_models.semantic_component_influence_candidates", "qwen3.5:4b")
+    test_config.set("router.task_thinking.semantic_component_influence_candidates", thinking)
 
     test_config.validate()
 
 
-def test_validate_rejects_thinking_for_unvalidated_influence_model(test_config):
-    test_config.set("router.task_models.semantic_component_influence_candidates", "qwen3.5:4b")
-    test_config.set("router.task_thinking.semantic_component_influence_candidates", True)
+def test_validate_exposes_validated_thinking_tasks_as_metadata(test_config):
+    assert test_config.model_validated_thinking_tasks("qwen3.5:9b") == {"semantic_anchor_extraction"}
 
-    with pytest.raises(ValueError, match="not validated for thinking"):
-        test_config.validate()
+    test_config.set("router.task_models.semantic_pool_generation", "qwen3.5:9b")
+    test_config.set("router.task_thinking.semantic_pool_generation", "low")
+    test_config.validate()
 
 
 def test_validate_rejects_unknown_task_thinking_value(test_config):
