@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from binary_mopso_cd.services.ollama_client import (
     LLMCallLogger,
     OllamaChatClient,
@@ -142,6 +144,42 @@ def test_ollama_chat_client_uses_global_think_when_call_omits_think(tmp_path):
 
     assert text == "generated text"
     assert captured["chat"]["think"] == "medium"
+
+
+def test_ollama_chat_client_logs_empty_content_before_raising(tmp_path):
+    class StubClient:
+        def chat(self, **kwargs):
+            return {
+                "message": {"content": "", "thinking": "reasoning without final answer"},
+                "prompt_eval_count": 456,
+                "eval_count": 3640,
+            }
+
+    client = object.__new__(OllamaChatClient)
+    client.host = "http://127.0.0.1:11434"
+    client.timeout_seconds = 120
+    client.think = False
+    client.model_profiles = {}
+    client.client = StubClient()
+    client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+
+    with pytest.raises(RuntimeError, match="empty content"):
+        client.chat(
+            task_id="task-empty",
+            semantic_task="semantic_pool_generation",
+            model="qwen3.5:9b",
+            system_prompt="system",
+            user_prompt="user",
+            options={"temperature": 0.6, "top_p": 0.9},
+            response_format={"type": "object"},
+            think=True,
+        )
+
+    call = json.loads((tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert call["empty_content"] is True
+    assert call["content_chars"] == 0
+    assert call["thinking_chars"] == len("reasoning without final answer")
+    assert call["output_tokens"] == 3640
 
 
 def test_ollama_chat_client_async_uses_async_client_and_logs(monkeypatch, tmp_path):

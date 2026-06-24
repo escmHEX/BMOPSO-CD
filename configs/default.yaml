@@ -42,24 +42,39 @@ ollama:
   model_capabilities:
     llama3:
       thinking: false
+      validated_thinking_tasks: []
     llama3.1:8b:
       thinking: false
+      validated_thinking_tasks: []
     qwen3.5:2b:
       thinking: true
+      validated_thinking_tasks: []
     qwen3:4b-instruct-2507-q4_K_M:
       thinking: true
+      validated_thinking_tasks: []
     phi4-mini:
       thinking: false
+      validated_thinking_tasks: []
     ministral-3:3b:
       thinking: false
+      validated_thinking_tasks: []
     gemma4:e4b:
       thinking: true
+      validated_thinking_tasks:
+        - semantic_anchor_extraction
+        - semantic_pool_generation
     qwen3.5:4b:
       thinking: true
+      validated_thinking_tasks: []
     qwen3.5:9b:
       thinking: true
+      validated_thinking_tasks:
+        - semantic_anchor_extraction
     lfm2.5:8b:
       thinking: true
+      validated_thinking_tasks:
+        - semantic_anchor_extraction
+        - semantic_pool_generation
   model_profiles:
     default:
       response_thinking:

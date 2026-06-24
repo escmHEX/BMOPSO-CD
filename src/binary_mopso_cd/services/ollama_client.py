@@ -77,6 +77,10 @@ def ollama_usage_metadata(response: Any) -> dict[str, Any]:
         if value is not None:
             metadata[output_key] = value
             metadata[source_key] = value
+    for source_key in ("done", "done_reason", "created_at"):
+        value = response_value(response, source_key)
+        if value is not None:
+            metadata[source_key] = value
     input_tokens = response_value(response, "prompt_eval_count")
     output_tokens = response_value(response, "eval_count")
     if input_tokens is not None:
@@ -173,6 +177,7 @@ class OllamaChatClient:
                 "elapsed_seconds": elapsed,
                 "content_chars": len(str(content)),
                 "raw_content_chars": len(str(raw_content)),
+                "empty_content": not bool(str(content).strip()),
                 "thinking_chars": len(thinking),
                 "content_thinking_stripped": raw_content != content,
                 **ollama_usage_metadata(response),

@@ -89,6 +89,17 @@ class RuntimeConfig:
         for model, values in raw_capabilities.items():
             if not isinstance(values, dict):
                 raise ValueError(f"ollama.model_capabilities.{model} must be a mapping")
+            validated_tasks = values.get("validated_thinking_tasks", [])
+            if validated_tasks is None:
+                validated_tasks = []
+            if not isinstance(validated_tasks, list):
+                raise ValueError(f"ollama.model_capabilities.{model}.validated_thinking_tasks must be a list")
+            normalized = []
+            for task in validated_tasks:
+                text = str(task).strip()
+                if text:
+                    normalized.append(text)
+            values = {**values, "validated_thinking_tasks": normalized}
             capabilities[str(model)] = dict(values)
         return capabilities
 
@@ -108,6 +119,12 @@ class RuntimeConfig:
         if model not in capabilities:
             raise ValueError(f"Model {model!r} is not declared in ollama.model_capabilities")
         return bool(capabilities[model].get("thinking", False))
+
+    def model_validated_thinking_tasks(self, model: str) -> set[str]:
+        capabilities = self.ollama_model_capabilities()
+        if model not in capabilities:
+            raise ValueError(f"Model {model!r} is not declared in ollama.model_capabilities")
+        return set(capabilities[model].get("validated_thinking_tasks", []))
 
     def resolved_task_model(self, semantic_task: str, operation_context: str | None = None) -> str:
         if operation_context:
@@ -210,6 +227,9 @@ class RuntimeConfig:
                 if not supports_thinking:
                     context_label = f" in {context}" if context else ""
                     raise ValueError(f"{model} for {semantic_task}{context_label} does not support thinking")
+                if str(semantic_task) not in self.model_validated_thinking_tasks(model):
+                    context_label = f" in {context}" if context else ""
+                    raise ValueError(f"{model} for {semantic_task}{context_label} is not validated for thinking")
 
     def as_dict(self) -> dict[str, Any]:
         return deepcopy(self.data)

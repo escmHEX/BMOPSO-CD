@@ -170,20 +170,40 @@ def test_validate_rejects_task_thinking_true_for_unknown_model(test_config):
 @pytest.mark.parametrize(
     "model",
     [
-        "qwen3.5:2b",
-        "qwen3:4b-instruct-2507-q4_K_M",
         "gemma4:e4b",
-        "qwen3.5:4b",
-        "qwen3.5:9b",
         "lfm2.5:8b",
     ],
 )
 @pytest.mark.parametrize("thinking", [True, "low", "medium", "high"])
-def test_validate_allows_task_thinking_for_compatible_models(test_config, model, thinking):
-    test_config.set("router.task_models.synthetic_text_generation", model)
-    test_config.set("router.task_thinking.synthetic_text_generation", thinking)
+def test_validate_allows_task_thinking_for_validated_model_tasks(test_config, model, thinking):
+    test_config.set("router.task_models.semantic_pool_generation", model)
+    test_config.set("router.task_thinking.semantic_pool_generation", thinking)
 
     test_config.validate()
+
+
+@pytest.mark.parametrize("thinking", [True, "low"])
+def test_validate_rejects_task_thinking_for_unvalidated_model_task(test_config, thinking):
+    test_config.set("router.task_models.semantic_pool_generation", "qwen3.5:9b")
+    test_config.set("router.task_thinking.semantic_pool_generation", thinking)
+
+    with pytest.raises(ValueError, match="not validated for thinking"):
+        test_config.validate()
+
+
+def test_validate_allows_task_thinking_for_validated_task_on_same_model(test_config):
+    test_config.set("router.task_models.semantic_anchor_extraction", "qwen3.5:9b")
+    test_config.set("router.task_thinking.semantic_anchor_extraction", "low")
+
+    test_config.validate()
+
+
+def test_validate_rejects_thinking_for_unvalidated_influence_model(test_config):
+    test_config.set("router.task_models.semantic_component_influence_candidates", "qwen3.5:4b")
+    test_config.set("router.task_thinking.semantic_component_influence_candidates", True)
+
+    with pytest.raises(ValueError, match="not validated for thinking"):
+        test_config.validate()
 
 
 def test_validate_rejects_unknown_task_thinking_value(test_config):
