@@ -117,7 +117,7 @@ logging:
 router:
   task_models:
     semantic_anchor_extraction: "llama3.1:8b"
-    central_anchor_selection: "llama3.1:8b"
+    central_anchor_selection: "gemma4:e4b"
     semantic_pool_generation: "llama3.1:8b"
     semantic_pool_expansion: "llama3.1:8b"
     semantic_component_influence_candidates: "llama3.1:8b"
@@ -139,7 +139,7 @@ router:
       synthetic_text_generation: null
   task_thinking:
     semantic_anchor_extraction: null
-    central_anchor_selection: null
+    central_anchor_selection: high
     semantic_pool_generation: null
     semantic_pool_expansion: null
     semantic_component_influence_candidates: null

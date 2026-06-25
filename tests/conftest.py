@@ -27,6 +27,7 @@ def test_config() -> RuntimeConfig:
         "synthetic_text_generation",
     ]:
         config.set(f"router.task_models.{task}", "llama3.1:8b")
+        config.set(f"router.task_thinking.{task}", None)
     config.set("selection.k", 2)
     config.validate()
     return config

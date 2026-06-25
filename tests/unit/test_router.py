@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.router import (
     ALG_DISTILBERT,
     ALG_LLM,
@@ -38,6 +41,26 @@ def test_router_routes_central_anchor_selection_with_default_llm_params(test_con
     execution = router.route(task)
 
     assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["temperature"] == 0.60
+    assert execution.alg_params["top_p"] == 0.90
+
+
+def test_default_config_routes_central_anchor_selection_to_gemma_high_thinking():
+    config = RuntimeConfig.load(Path("configs/default.yaml"))
+    config.validate()
+    router = SemanticRouter(config)
+    task = RouteTask(
+        "1",
+        "optimization",
+        TASK_CENTRAL_ANCHOR_SELECTION,
+        {"referenceText": "Flood warning now", "semanticAnchors": {}, "numCentralAnchors": 4},
+    )
+
+    execution = router.route(task)
+
+    assert execution.alg_name == ALG_LLM
+    assert execution.alg_params["model"] == "gemma4:e4b"
+    assert execution.alg_params["thinking"] == "high"
     assert execution.alg_params["temperature"] == 0.60
     assert execution.alg_params["top_p"] == 0.90
 
