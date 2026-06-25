@@ -66,6 +66,8 @@ class MOPSOSettings:
     tau_dup: float
     tau_tur_min: float
     tau_tur_max: float
+    guided_trajectory_validation_enabled: bool
+    guided_trajectory_relative_margin: float
     utility_weights: dict[str, float]
 
     @classmethod
@@ -89,6 +91,8 @@ class MOPSOSettings:
             tau_dup=float(config.get("mopso.tau_dup", 0.92)),
             tau_tur_min=float(config.get("mopso.tau_tur_min", 0.65)),
             tau_tur_max=float(config.get("mopso.tau_tur_max", 0.90)),
+            guided_trajectory_validation_enabled=config.get("mopso.guided_trajectory_validation_enabled", True) is True,
+            guided_trajectory_relative_margin=float(config.get("mopso.guided_trajectory_relative_margin", 0.40)),
             utility_weights=dict(config.get("mopso.utility_weights", {"f1": 0.5, "f2": 0.5})),
         )
 

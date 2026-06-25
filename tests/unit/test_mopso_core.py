@@ -375,6 +375,86 @@ def test_mopso_turbulence_params_include_selected_unit_contract(test_config, tmp
     assert params["target_index"] == 1
 
 
+def test_mopso_guided_candidate_rejects_excessive_angular_trajectory(test_config, tmp_path):
+    candidate_x = math.cos(math.radians(80.0))
+    candidate_y = 0.5
+    candidate_z = math.sqrt(1.0 - candidate_x**2 - candidate_y**2)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [math.cos(math.radians(60.0)), math.sin(math.radians(60.0)), 0.0],
+            "wide candidate": [candidate_x, candidate_y, candidate_z],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    result = engine._select_guided_candidate("topic", "current topic", "target topic", ["wide candidate"])
+
+    assert result is None
+
+
+def test_mopso_guided_candidate_can_disable_angular_trajectory_validation(test_config, tmp_path):
+    test_config.set("mopso.guided_trajectory_validation_enabled", False)
+    candidate_x = math.cos(math.radians(80.0))
+    candidate_y = 0.5
+    candidate_z = math.sqrt(1.0 - candidate_x**2 - candidate_y**2)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [math.cos(math.radians(60.0)), math.sin(math.radians(60.0)), 0.0],
+            "wide candidate": [candidate_x, candidate_y, candidate_z],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    result = engine._select_guided_candidate("topic", "current topic", "target topic", ["wide candidate"])
+
+    assert result == "wide candidate"
+
+
+def test_mopso_guided_candidate_uses_configurable_trajectory_margin(test_config, tmp_path):
+    test_config.set("mopso.guided_trajectory_relative_margin", 1.5)
+    candidate_x = math.cos(math.radians(80.0))
+    candidate_y = 0.5
+    candidate_z = math.sqrt(1.0 - candidate_x**2 - candidate_y**2)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [math.cos(math.radians(60.0)), math.sin(math.radians(60.0)), 0.0],
+            "wide candidate": [candidate_x, candidate_y, candidate_z],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+
+    result = engine._select_guided_candidate("topic", "current topic", "target topic", ["wide candidate"])
+
+    assert result == "wide candidate"
+
+
 def test_mopso_text_generation_uses_base_prompt_and_checkpoint_persists_anchors(test_config, tmp_path):
     executor = StubExecutor()
     central_anchors = ["bridge", "flooded roads", "request support", "urgent"]

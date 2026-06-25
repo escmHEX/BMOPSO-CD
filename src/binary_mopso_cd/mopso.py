@@ -37,6 +37,7 @@ from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, s
 
 SolutionSignature = tuple[tuple[str, str], ...]
 GUIDED_MOVES = {"cognitive", "social"}
+GUIDED_TRAJECTORY_EPSILON = 1e-8
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -52,6 +53,19 @@ def utility(objectives: Objectives, weights: dict[str, float] | None = None) -> 
 
 def semantic_velocity_delta(left_embedding: np.ndarray, right_embedding: np.ndarray) -> float:
     return (1.0 - float(left_embedding @ right_embedding)) / 2.0
+
+
+def guided_trajectory_consistency_mask(
+    current_target_similarity: float,
+    candidate_current_similarities: np.ndarray,
+    candidate_target_similarities: np.ndarray,
+    relative_margin: float,
+) -> np.ndarray:
+    direct_path = float(np.arccos(np.clip(current_target_similarity, -1.0, 1.0)))
+    candidate_path = np.arccos(np.clip(candidate_current_similarities, -1.0, 1.0)) + np.arccos(
+        np.clip(candidate_target_similarities, -1.0, 1.0)
+    )
+    return candidate_path <= (1.0 + relative_margin) * direct_path + GUIDED_TRAJECTORY_EPSILON
 
 
 def crowding_distance(solutions: list[Solution]) -> dict[str, float]:
@@ -867,7 +881,16 @@ class BinaryMOPSOCDEngine:
         target_embeddings = self.executor.embedding_service.encode([current, target], text_type="component")
         before = float(target_embeddings[0] @ target_embeddings[1])
         target_sims = candidate_embeddings @ target_embeddings[1]
-        valid_indices = np.where((duplicate_sims < self.mopso.tau_dup) & (target_sims > before))[0]
+        valid_mask = (duplicate_sims < self.mopso.tau_dup) & (target_sims > before)
+        if self.mopso.guided_trajectory_validation_enabled:
+            current_sims = candidate_embeddings @ target_embeddings[0]
+            valid_mask &= guided_trajectory_consistency_mask(
+                before,
+                current_sims,
+                target_sims,
+                self.mopso.guided_trajectory_relative_margin,
+            )
+        valid_indices = np.where(valid_mask)[0]
         if valid_indices.size == 0:
             return None
         best_idx = int(valid_indices[np.argmax(target_sims[valid_indices])])

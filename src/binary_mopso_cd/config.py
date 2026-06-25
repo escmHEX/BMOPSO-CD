@@ -328,6 +328,7 @@ class RuntimeConfig:
             "mopso.tau_dup",
             "mopso.tau_tur_min",
             "mopso.tau_tur_max",
+            "mopso.guided_trajectory_relative_margin",
         ]:
             value = float(self.get(path))
             if value < 0:
@@ -337,6 +338,9 @@ class RuntimeConfig:
         p_anchor_enabled = self.get("mopso.p_anchor_enabled", False)
         if not isinstance(p_anchor_enabled, bool):
             raise ValueError("mopso.p_anchor_enabled must be boolean")
+        guided_trajectory_validation_enabled = self.get("mopso.guided_trajectory_validation_enabled", True)
+        if not isinstance(guided_trajectory_validation_enabled, bool):
+            raise ValueError("mopso.guided_trajectory_validation_enabled must be boolean")
         p_anchor_min = float(self.get("mopso.p_anchor_min", 0.05))
         p_anchor_max = float(self.get("mopso.p_anchor_max", 0.70))
         if p_anchor_min > p_anchor_max:
