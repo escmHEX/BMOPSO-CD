@@ -199,6 +199,13 @@ class ParticleUpdateResult:
     optimization_rejections: tuple[dict[str, Any], ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class MovementContext:
+    effective_mode: str
+    target_position: dict[str, str]
+    used_inertia: bool = False
+
+
 def particle_update_seed(base_seed: int, generation: int, index: int) -> int:
     digest = stable_digest({"seed": base_seed, "generation": generation, "particle_index": index})
     return int(digest[:16], 16)
@@ -441,22 +448,29 @@ class BinaryMOPSOCDEngine:
             if roll < p_tur:
                 mode = "turbulence"
             elif rng.random() < q_pso:
-                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, rng)
+                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, generation, rng)
             if mode:
                 candidates.append((component, mode, q_eff))
         max_changes = min(self.mopso.dmax, len(candidates))
         if len(candidates) > max_changes:
             candidates = weighted_sample_without_replacement(candidates, max_changes, rng)
         for component, mode, _weight in candidates:
-            effective_mode = self._effective_candidate_mode(component, mode, updated)
-            if effective_mode is None:
+            context = self._movement_context(component, mode, updated, pbest, leader, generation)
+            if context is None:
                 continue
-            replacement = self._candidate_for_mode(component, effective_mode, updated, pbest, leader, generation, rng)
+            replacement = self._candidate_for_mode(component, mode, updated, pbest, leader, generation, rng)
+            if context.used_inertia:
+                updated.last_guided_move.pop(component, None)
             if replacement:
                 updated.vector.components[component] = replacement
                 updated.changed = True
-                if effective_mode in GUIDED_MOVES:
-                    updated.last_guided_move[component] = effective_mode
+                if context.effective_mode in GUIDED_MOVES and not context.used_inertia:
+                    updated.last_guided_move[component] = self._guided_move_memory(
+                        context.effective_mode,
+                        context.target_position,
+                        replacement,
+                        generation,
+                    )
         for component in self.components.frozen:
             updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
             updated.velocity[component] = particle.velocity.get(component, 0.0)
@@ -546,22 +560,29 @@ class BinaryMOPSOCDEngine:
             if roll < p_tur:
                 mode = "turbulence"
             elif rng.random() < q_pso:
-                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, rng)
+                mode = self._guided_mode(component, s_in_weight, s_cog, s_soc, particle, generation, rng)
             if mode:
                 candidates.append((component, mode, q_eff))
         max_changes = min(self.mopso.dmax, len(candidates))
         if len(candidates) > max_changes:
             candidates = weighted_sample_without_replacement(candidates, max_changes, rng)
         for component, mode, _weight in candidates:
-            effective_mode = self._effective_candidate_mode(component, mode, updated)
-            if effective_mode is None:
+            context = self._movement_context(component, mode, updated, pbest, leader, generation)
+            if context is None:
                 continue
-            replacement = await self._candidate_for_mode_async(component, effective_mode, updated, pbest, leader, generation, rng)
+            replacement = await self._candidate_for_mode_async(component, mode, updated, pbest, leader, generation, rng)
+            if context.used_inertia:
+                updated.last_guided_move.pop(component, None)
             if replacement:
                 updated.vector.components[component] = replacement
                 updated.changed = True
-                if effective_mode in GUIDED_MOVES:
-                    updated.last_guided_move[component] = effective_mode
+                if context.effective_mode in GUIDED_MOVES and not context.used_inertia:
+                    updated.last_guided_move[component] = self._guided_move_memory(
+                        context.effective_mode,
+                        context.target_position,
+                        replacement,
+                        generation,
+                    )
         for component in self.components.frozen:
             updated.vector.components[component] = updated.initial_components.get(component, particle.vector.components[component])
             updated.velocity[component] = particle.velocity.get(component, 0.0)
@@ -625,11 +646,12 @@ class BinaryMOPSOCDEngine:
         cognitive_weight: float,
         social_weight: float,
         particle: Solution,
+        generation: int,
         rng: Random | None = None,
     ) -> str | None:
         rng = rng or self.rng
         weights = {
-            "inertia": inertia_weight if self._last_guided_move(component, particle) is not None else 0.0,
+            "inertia": inertia_weight if self._valid_inertia_memory(component, particle, generation) is not None else 0.0,
             "cognitive": cognitive_weight,
             "social": social_weight,
         }
@@ -655,12 +677,12 @@ class BinaryMOPSOCDEngine:
         rng: Random | None = None,
     ) -> str | None:
         current = particle.vector.components[component]
-        effective_mode = self._effective_candidate_mode(component, mode, particle)
-        if effective_mode is None:
+        context = self._movement_context(component, mode, particle, pbest, leader, generation)
+        if context is None:
             return None
-        if effective_mode == "turbulence":
+        if context.effective_mode == "turbulence":
             return self._turbulence_candidate(component, current, rng=rng)
-        target = pbest.vector.components[component] if effective_mode == "cognitive" else leader.vector.components[component]
+        target = context.target_position[component]
         route = RouteTask(
             uuid4().hex,
             "optimization",
@@ -681,12 +703,12 @@ class BinaryMOPSOCDEngine:
         rng: Random,
     ) -> str | None:
         current = particle.vector.components[component]
-        effective_mode = self._effective_candidate_mode(component, mode, particle)
-        if effective_mode is None:
+        context = self._movement_context(component, mode, particle, pbest, leader, generation)
+        if context is None:
             return None
-        if effective_mode == "turbulence":
+        if context.effective_mode == "turbulence":
             return self._turbulence_candidate(component, current, rng=rng)
-        target = pbest.vector.components[component] if effective_mode == "cognitive" else leader.vector.components[component]
+        target = context.target_position[component]
         route = RouteTask(
             uuid4().hex,
             "optimization",
@@ -700,16 +722,70 @@ class BinaryMOPSOCDEngine:
             raw_candidates = list(self.executor.execute(routed))
         return self._select_guided_candidate(component, current, target, raw_candidates)
 
-    def _effective_candidate_mode(self, component: str, mode: str, particle: Solution) -> str | None:
-        if mode == "inertia":
-            return self._last_guided_move(component, particle)
-        if mode == "turbulence" or mode in GUIDED_MOVES:
-            return mode
-        return None
+    def _effective_candidate_mode(
+        self,
+        component: str,
+        mode: str,
+        particle: Solution,
+        generation: int,
+    ) -> str | None:
+        context = self._movement_context(component, mode, particle, particle, particle, generation)
+        return None if context is None else context.effective_mode
 
-    def _last_guided_move(self, component: str, particle: Solution) -> str | None:
-        movement = str(particle.last_guided_move.get(component, "")).strip().lower()
-        return movement if movement in GUIDED_MOVES else None
+    def _movement_context(
+        self,
+        component: str,
+        mode: str,
+        particle: Solution,
+        pbest: Solution,
+        leader: Solution,
+        generation: int,
+    ) -> MovementContext | None:
+        if mode == "turbulence":
+            return MovementContext("turbulence", {})
+        if mode == "cognitive":
+            return MovementContext("cognitive", dict(pbest.vector.components))
+        if mode == "social":
+            return MovementContext("social", dict(leader.vector.components))
+        if mode != "inertia":
+            return None
+        memory = self._valid_inertia_memory(component, particle, generation)
+        if memory is None:
+            return None
+        return MovementContext(memory["movement"], dict(memory["target_position"]), used_inertia=True)
+
+    def _valid_inertia_memory(self, component: str, particle: Solution, generation: int) -> dict[str, Any] | None:
+        memory = particle.last_guided_move.get(component)
+        if not isinstance(memory, dict):
+            return None
+        movement = str(memory.get("movement", "")).strip().lower()
+        target_position = memory.get("target_position")
+        if movement not in GUIDED_MOVES or not isinstance(target_position, dict):
+            return None
+        if component not in target_position:
+            return None
+        if int(memory.get("iteration", -1)) != generation - 1:
+            return None
+        return {
+            "movement": movement,
+            "target_position": dict(target_position),
+            "accepted_component": str(memory.get("accepted_component", "")),
+            "iteration": int(memory["iteration"]),
+        }
+
+    @staticmethod
+    def _guided_move_memory(
+        movement: str,
+        target_position: dict[str, str],
+        accepted_component: str,
+        generation: int,
+    ) -> dict[str, Any]:
+        return {
+            "movement": movement,
+            "target_position": dict(target_position),
+            "accepted_component": accepted_component,
+            "iteration": generation,
+        }
 
     def _influence_task_params(
         self,

@@ -35,7 +35,7 @@ class Solution:
     objectives: Objectives | None = None
     solution_id: str = field(default_factory=lambda: uuid4().hex)
     velocity: dict[str, float] = field(default_factory=dict)
-    last_guided_move: dict[str, str] = field(default_factory=dict)
+    last_guided_move: dict[str, Any] = field(default_factory=dict)
     initial_components: dict[str, str] = field(default_factory=dict)
     changed: bool = True
     generation: int = 0
@@ -50,7 +50,7 @@ class Solution:
             objectives=None if self.objectives is None else Objectives(self.objectives.f1, self.objectives.f2),
             solution_id=self.solution_id if keep_id else uuid4().hex,
             velocity=dict(self.velocity),
-            last_guided_move=dict(self.last_guided_move),
+            last_guided_move=copy_last_guided_move(self.last_guided_move),
             initial_components=dict(self.initial_components),
             changed=self.changed,
             generation=self.generation,
@@ -69,7 +69,7 @@ def solution_to_dict(solution: Solution) -> dict[str, Any]:
         if solution.objectives is None
         else {"f1": solution.objectives.f1, "f2": solution.objectives.f2},
         "velocity": dict(solution.velocity),
-        "last_guided_move": dict(solution.last_guided_move),
+        "last_guided_move": copy_last_guided_move(solution.last_guided_move),
         "initial_components": dict(solution.initial_components),
         "changed": solution.changed,
         "generation": solution.generation,
@@ -89,7 +89,7 @@ def solution_from_dict(payload: dict[str, Any]) -> Solution:
         if objectives_payload is None
         else Objectives(float(objectives_payload["f1"]), float(objectives_payload["f2"])),
         velocity=dict(payload.get("velocity", {})),
-        last_guided_move=dict(payload.get("last_guided_move", {})),
+        last_guided_move=copy_last_guided_move(dict(payload.get("last_guided_move", {}))),
         initial_components=dict(payload.get("initial_components", {})),
         changed=bool(payload.get("changed", False)),
         generation=int(payload.get("generation", 0)),
@@ -97,3 +97,16 @@ def solution_from_dict(payload: dict[str, Any]) -> Solution:
         metadata=dict(payload.get("metadata", {})),
     )
 
+
+def copy_last_guided_move(last_guided_move: dict[str, Any]) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    for component, memory in last_guided_move.items():
+        if isinstance(memory, dict):
+            memory_copy = dict(memory)
+            target_position = memory_copy.get("target_position")
+            if isinstance(target_position, dict):
+                memory_copy["target_position"] = dict(target_position)
+            copied[component] = memory_copy
+        else:
+            copied[component] = memory
+    return copied

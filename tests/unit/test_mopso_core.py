@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from random import Random
 
 import numpy as np
 import pytest
 
-from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
+from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_from_dict, solution_to_dict
 from binary_mopso_cd.mopso import (
     BinaryMOPSOCDEngine,
     ExternalArchive,
@@ -87,7 +88,13 @@ class GuidedMoveEmbeddingService:
         return np.asarray([self._vector(text) for text in texts], dtype=float)
 
     def _vector(self, text: str) -> list[float]:
-        if text in {"pbest topic", "leader topic", "leader aligned topic", "updated topic"}:
+        if text in {
+            "pbest topic",
+            "leader topic",
+            "leader aligned topic",
+            "updated topic",
+            "async aligned topic",
+        }:
             return [0.0, 1.0]
         return [1.0, 0.0]
 
@@ -106,6 +113,11 @@ class GuidedMoveExecutor:
         if task.semantic_task == TASK_SYNTHETIC_TEXT:
             return "valid generated text"
         return list(self.candidates)
+
+
+class AsyncGuidedMoveExecutor(GuidedMoveExecutor):
+    async def execute_async(self, task):
+        return self.execute(task)
 
 
 def topic_only_components() -> ComponentSettings:
@@ -591,7 +603,7 @@ def test_mopso_unchanged_particle_does_not_generate_text_or_evaluate_anchor_prob
     assert all(task.semantic_task != TASK_SYNTHETIC_TEXT for task in executor.tasks)
 
 
-def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_config, tmp_path):
+def test_mopso_stores_guided_movement_memory_after_cognitive_acceptance(test_config, tmp_path):
     test_config.set("mopso.p_tur_max", 0.0)
     test_config.set("mopso.p_tur_min", 0.0)
     executor = GuidedMoveExecutor()
@@ -625,10 +637,41 @@ def test_mopso_stores_guided_movement_type_after_cognitive_acceptance(test_confi
 
     assert updated.changed
     assert updated.vector.components["topic"] == "updated topic"
-    assert updated.last_guided_move["topic"] == "cognitive"
+    assert updated.last_guided_move["topic"] == {
+        "movement": "cognitive",
+        "target_position": {"topic": "pbest topic"},
+        "accepted_component": "updated topic",
+        "iteration": 1,
+    }
 
 
-def test_mopso_inertia_repeats_last_social_move_toward_leader(test_config, tmp_path):
+def test_solution_clone_and_serialization_deep_copy_inertia_memory():
+    solution = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "prompt",
+        "text",
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "leader aligned topic",
+                "iteration": 1,
+            }
+        },
+    )
+
+    clone = solution.clone()
+    clone.last_guided_move["topic"]["target_position"]["topic"] = "mutated target"
+    payload = solution_to_dict(solution)
+    payload["last_guided_move"]["topic"]["target_position"]["topic"] = "payload target"
+    restored = solution_from_dict(solution_to_dict(solution))
+    restored.last_guided_move["topic"]["target_position"]["topic"] = "restored target"
+
+    assert solution.last_guided_move["topic"]["target_position"]["topic"] == "leader topic"
+
+
+def test_mopso_inertia_repeats_last_social_move_toward_previous_target(test_config, tmp_path):
+    test_config.set("experiment.iterations", 2)
     executor = GuidedMoveExecutor(["leader aligned topic"])
     engine = BinaryMOPSOCDEngine(
         test_config,
@@ -642,15 +685,180 @@ def test_mopso_inertia_repeats_last_social_move_toward_leader(test_config, tmp_p
         SemanticVector({"topic": "current topic"}),
         "prompt",
         "text",
-        last_guided_move={"topic": "social"},
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "previous accepted topic",
+                "iteration": 1,
+            }
+        },
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "new leader topic"}), "prompt", "text")
+
+    result = engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=2)
+
+    assert result == "leader aligned topic"
+    assert executor.executed_task.task_params["targetComponent"] == "leader topic"
+
+
+def test_mopso_inertia_consumes_memory_without_creating_new_chain(test_config, tmp_path):
+    test_config.set("experiment.iterations", 2)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    executor = GuidedMoveExecutor(["leader aligned topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "inertia"
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generate_text = lambda _prompt, **_kwargs: "valid generated text"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "previous accepted topic",
+                "iteration": 1,
+            }
+        },
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "new leader topic"}), "prompt", "text")
+
+    updated = engine._update_particle(particle, pbest, leader, generation=2)
+
+    assert updated.changed
+    assert updated.vector.components["topic"] == "leader aligned topic"
+    assert "topic" not in updated.last_guided_move
+
+
+def test_mopso_rejected_inertia_text_restores_consumed_memory(test_config, tmp_path):
+    test_config.set("experiment.iterations", 2)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    executor = GuidedMoveExecutor(["leader aligned topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "inertia"
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generate_text = lambda _prompt, **_kwargs: "not a feasible request"
+    memory = {
+        "topic": {
+            "movement": "social",
+            "target_position": {"topic": "leader topic"},
+            "accepted_component": "previous accepted topic",
+            "iteration": 1,
+        }
+    }
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        last_guided_move=memory,
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "new leader topic"}), "prompt", "text")
+
+    updated = engine._update_particle(particle, pbest, leader, generation=2)
+
+    assert not updated.changed
+    assert updated.vector.components == particle.vector.components
+    assert updated.last_guided_move == memory
+    assert updated.velocity["topic"] != particle.velocity["topic"]
+    assert executor.executed_task.task_params["targetComponent"] == "leader topic"
+    assert (tmp_path / "optimization_rejections.jsonl").exists()
+
+
+def test_mopso_async_inertia_uses_previous_target(test_config, tmp_path):
+    test_config.set("experiment.iterations", 2)
+    executor = AsyncGuidedMoveExecutor(["async aligned topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "prompt",
+        "text",
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "previous accepted topic",
+                "iteration": 1,
+            }
+        },
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "new leader topic"}), "prompt", "text")
+
+    result = asyncio.run(engine._candidate_for_mode_async("topic", "inertia", particle, pbest, leader, 2, Random(1)))
+
+    assert result == "async aligned topic"
+    assert executor.executed_task.task_params["targetComponent"] == "leader topic"
+
+
+def test_mopso_expired_inertia_memory_does_not_enable_inertia(test_config, tmp_path):
+    test_config.set("experiment.iterations", 3)
+    executor = GuidedMoveExecutor(["leader aligned topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "prompt",
+        "text",
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "previous accepted topic",
+                "iteration": 1,
+            }
+        },
     )
     pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
     leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
 
-    result = engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=1)
-
-    assert result == "leader aligned topic"
-    assert executor.executed_task.task_params["targetComponent"] == "leader topic"
+    assert engine._guided_mode("topic", 10.0, 0.0, 0.0, particle, generation=3) is None
+    assert engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=3) is None
+    assert executor.executed_task is None
 
 
 def test_mopso_legacy_textual_last_guided_move_does_not_enable_inertia(test_config, tmp_path):
@@ -672,6 +880,6 @@ def test_mopso_legacy_textual_last_guided_move_does_not_enable_inertia(test_conf
     pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
     leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text")
 
-    assert engine._guided_mode("topic", 10.0, 0.0, 0.0, particle) is None
-    assert engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=1) is None
+    assert engine._guided_mode("topic", 10.0, 0.0, 0.0, particle, generation=2) is None
+    assert engine._candidate_for_mode("topic", "inertia", particle, pbest, leader, generation=2) is None
     assert executor.executed_task is None

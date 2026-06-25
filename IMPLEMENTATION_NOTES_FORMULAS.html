@@ -339,7 +339,9 @@
       <div class="formula-card"><h4>Inercia decreciente</h4><div class="math">\[\omega(t)=\omega_{max}-(\omega_{max}-\omega_{min})\rho(t,G)\]</div></div>
       <div class="formula-card"><h4>Turbulencia decreciente</h4><div class="math">\[p_{tur}(t)=p_{tur}^{max}-(p_{tur}^{max}-p_{tur}^{min})\rho(t,G)\]</div></div>
       <div class="formula-card"><h4>Terminos de velocidad</h4><div class="math">\[s_{in}=\omega(t)v_{i,d}^{t}\]\[s_{cog}=c_1r_1\Delta(x_{i,d}^{t},pbest_{i,d}^{t})\]\[s_{soc}=c_2r_2\Delta(x_{i,d}^{t},L_{i,d}^{t})\]\[v_{raw}=s_{in}+s_{cog}+s_{soc}\]</div></div>
-      <div class="formula-card"><h4>Peso de inercia para seleccionar fuente</h4><div class="math">\[a_{in}=\omega(t)\lvert v_{i,d}^{t}\rvert\]</div></div>
+      <div class="formula-card"><h4>Memoria de inercia</h4><div class="math">\[H_{i,d}^{t}=\{\text{movement},\text{target\_position},\text{accepted\_component},\text{iteration}\}\]</div><p>Se guarda solo tras movimientos cognitivos/sociales aceptados.</p></div>
+      <div class="formula-card"><h4>Peso de inercia para seleccionar fuente</h4><div class="math">\[a_{in,i,d}^{t}=\begin{cases}\omega(t)\lvert v_{i,d}^{t}\rvert,&H_{i,d}^{t}\neq\varnothing\land H_{i,d}^{t}.\text{iteration}=t-1\\0,&\text{en otro caso}\end{cases}\]</div></div>
+      <div class="formula-card"><h4>Objetivo de inercia</h4><div class="math">\[\text{movement}\leftarrow H_{i,d}^{t}.\text{movement}\]\[\text{target}\leftarrow H_{i,d}^{t}.\text{target\_position}[d]\]</div><p>La memoria se consume al seleccionar inercia y no crea una nueva cadena de inercia.</p></div>
       <div class="formula-card"><h4>Clamp de velocidad</h4><div class="math">\[\hat v_{i,d}^{t+1}=\min(V_{max},\max(-V_{max},v_{raw}))\]</div></div>
       <div class="formula-card"><h4>Transferencia V-shaped</h4><div class="math">\[q_{pso,i,d}^{t}=\lvert\tanh(\alpha\hat v_{i,d}^{t+1})\rvert\]</div></div>
       <div class="formula-card"><h4>Probabilidad efectiva</h4><div class="math">\[q_{eff}=1-(1-q_{pso})(1-p_{tur})\]</div></div>
@@ -459,7 +461,7 @@
       <tr class="mopso"><td>MOPSO</td><td>Torneo lider</td><td>\(q\)</td><td>3</td><td><code>mopso.leader_tournament_size</code></td><td>Lider por CD.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Cambios maximos</td><td>\(D_{max}\)</td><td>1</td><td><code>mopso.dmax</code></td><td>Componentes activas por particula/generacion cuando hay activas.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Candidatos</td><td>\(K_{cand}\)</td><td>6</td><td><code>mopso.kcand</code></td><td>Variantes por operador.</td><td class="status-ok">OK</td></tr>
-      <tr class="mopso"><td>MOPSO</td><td>Inercia</td><td>\(\omega_{max},\omega_{min}\)</td><td>0.9, 0.4</td><td><code>mopso.omega_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
+      <tr class="mopso"><td>MOPSO</td><td>Inercia</td><td>\(\omega_{max},\omega_{min}\)</td><td>0.9, 0.4</td><td><code>mopso.omega_*</code></td><td>Schedule lineal con memoria consumible hacia objetivo anterior.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Cognitivo/social</td><td>\(c_1,c_2\)</td><td>1.5, 1.5</td><td><code>mopso.c1</code>, <code>mopso.c2</code></td><td>Velocidad.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Clamp y escala</td><td>\(V_{max},\alpha\)</td><td>4.0, 1</td><td><code>mopso.vmax</code>, <code>mopso.alpha</code></td><td>Transferencia V-shaped.</td><td class="status-ok">OK</td></tr>
       <tr class="mopso"><td>MOPSO</td><td>Turbulencia</td><td>\(p_{tur}^{max},p_{tur}^{min}\)</td><td>0.07, 0.02</td><td><code>mopso.p_tur_*</code></td><td>Schedule lineal.</td><td class="status-ok">OK</td></tr>
