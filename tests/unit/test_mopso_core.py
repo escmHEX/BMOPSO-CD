@@ -13,6 +13,7 @@ from binary_mopso_cd.mopso import (
     BinaryMOPSOCDEngine,
     ExternalArchive,
     ParticleUpdateResult,
+    PopulationUpdateResult,
     archive_capacity,
     crowding_distance,
     dominates,
@@ -246,7 +247,7 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
                     "target": "topic 1",
                     "raw_candidate_count": 0,
                     "accepted_candidate": None,
-                    "rejected_count_by_reason": {},
+                    "rejected_count_by_reason": {"no_semantic_progress": 2, "literal_copy_current": 1},
                     "candidates": [],
                 },
             ),
@@ -254,9 +255,11 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
 
     engine._update_particle_job_async = synthetic_update
 
-    updated = engine._update_population(population, pbest, generation=1)
+    update_result = engine._update_population(population, pbest, generation=1)
+    assert isinstance(update_result, PopulationUpdateResult)
 
-    assert [solution.generated_text for solution in updated] == ["updated 0", "updated 1"]
+    assert [solution.generated_text for solution in update_result.population] == ["updated 0", "updated 1"]
+    assert update_result.guided_candidate_rejections == 3
     error_log = (tmp_path / "particle_update_errors.jsonl").read_text(encoding="utf-8")
     assert "worker failed" in error_log
     diagnostics = [
@@ -703,7 +706,7 @@ def test_mopso_update_writes_guided_candidate_diagnostics(test_config, tmp_path)
     leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text", Objectives(0.7, 0.7))
     engine.archive.solutions = [leader]
 
-    updated = engine._update_population([particle], [pbest], generation=1)
+    update_result = engine._update_population([particle], [pbest], generation=1)
 
     rows = [
         json.loads(line)
@@ -711,7 +714,8 @@ def test_mopso_update_writes_guided_candidate_diagnostics(test_config, tmp_path)
     ]
     assert len(rows) == 1
     row = rows[0]
-    assert updated[0].vector.components["topic"] == "updated topic"
+    assert update_result.population[0].vector.components["topic"] == "updated topic"
+    assert update_result.guided_candidate_rejections == 0
     assert row["phase"] == "optimization"
     assert row["generation"] == 1
     assert row["solution_id"] == particle.solution_id
@@ -732,7 +736,7 @@ def test_mopso_update_skips_guided_candidate_diagnostics_when_disabled(test_conf
     test_config.set("mopso.guided_candidate_diagnostics_enabled", False)
     test_config.set("mopso.p_tur_max", 0.0)
     test_config.set("mopso.p_tur_min", 0.0)
-    executor = GuidedMoveExecutor(["updated topic"])
+    executor = GuidedMoveExecutor(["current topic", "updated topic"])
     engine = BinaryMOPSOCDEngine(
         test_config,
         PassthroughRouter(),
@@ -759,8 +763,10 @@ def test_mopso_update_skips_guided_candidate_diagnostics_when_disabled(test_conf
     leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text", Objectives(0.7, 0.7))
     engine.archive.solutions = [leader]
 
-    engine._update_population([particle], [pbest], generation=1)
+    update_result = engine._update_population([particle], [pbest], generation=1)
 
+    assert update_result.population[0].vector.components["topic"] == "updated topic"
+    assert update_result.guided_candidate_rejections == 1
     assert not (tmp_path / "guided_candidate_diagnostics.jsonl").exists()
 
 

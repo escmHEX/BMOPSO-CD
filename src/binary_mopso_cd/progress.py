@@ -65,14 +65,14 @@ class ProgressLogger:
         population_size: int,
         archive_size: int,
         hypervolume: float | None,
-        spread: float | None,
+        guided_candidate_rejections: int,
         archive_update_count: int,
         archive_prune_count: int,
     ) -> None:
         self.info(
             (
-                "run %s/%s | generation %s/%s | modified=%s/%s | archive=%s | hv=%s | spread=%s "
-                "| archive_updates=%s | archive_prunes=%s | elapsed=%s"
+                "run %s/%s | generation %s/%s | modified=%s/%s | archive=%s | hv=%s "
+                "| guided_candidate_rejections=%s | archive_updates=%s | archive_prunes=%s | elapsed=%s"
             ),
             self.run_index,
             self.total_runs,
@@ -82,7 +82,7 @@ class ProgressLogger:
             population_size,
             archive_size,
             format_optional_float(hypervolume),
-            format_optional_float(spread),
+            guided_candidate_rejections,
             archive_update_count,
             archive_prune_count,
             format_elapsed(time.perf_counter() - self.started),

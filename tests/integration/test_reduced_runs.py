@@ -47,9 +47,11 @@ def test_reduced_optimization_run_uses_real_services(test_config, tmp_path):
         row = next(csv.DictReader(handle))
     assert "modified_count" in row
     assert "hypervolume" in row
-    assert "spread" in row
+    assert "guided_candidate_rejections" in row
+    assert "spread" not in row
     assert "archive_update_count" in row
     assert "archive_prune_count" in row
+    assert int(row["guided_candidate_rejections"]) >= 0
     assert int(row["archive_update_count"]) >= 1
     assert int(row["archive_prune_count"]) >= 0
 

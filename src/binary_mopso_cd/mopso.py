@@ -223,6 +223,12 @@ class ParticleUpdateResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PopulationUpdateResult:
+    population: list[Solution]
+    guided_candidate_rejections: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class MovementContext:
     effective_mode: str
     target_position: dict[str, str]
@@ -316,7 +322,8 @@ class BinaryMOPSOCDEngine:
             for generation in range(start_generation + 1, self.config.iterations + 1):
                 if self.progress_logger is not None:
                     self.progress_logger.generation_start(generation, self.config.iterations)
-                next_population = self._update_population(population, pbest, generation)
+                population_update = self._update_population(population, pbest, generation)
+                next_population = population_update.population
                 modified_count = sum(1 for solution in next_population if solution.changed)
                 comparison_batch = next_population + pbest + self.archive.solutions
                 evaluate_unique_solutions_by_signature(
@@ -335,7 +342,12 @@ class BinaryMOPSOCDEngine:
                 self.archive.update(next_population)
                 self.component_memory.add_solutions(next_population)
                 population = next_population
-                row = self._generation_metrics(generation, population, modified_count)
+                row = self._generation_metrics(
+                    generation,
+                    population,
+                    modified_count,
+                    population_update.guided_candidate_rejections,
+                )
                 metrics_rows.append(row)
                 if self.progress_logger is not None:
                     self.progress_logger.generation(
@@ -345,7 +357,7 @@ class BinaryMOPSOCDEngine:
                         len(population),
                         len(self.archive.solutions),
                         row["hypervolume"],
-                        row["spread"],
+                        row["guided_candidate_rejections"],
                         row["archive_update_count"],
                         row["archive_prune_count"],
                     )
@@ -365,12 +377,10 @@ class BinaryMOPSOCDEngine:
         self._write_monitor_metrics(monitor_rows)
         return population, self.archive
 
-    def _update_population(self, population: list[Solution], pbest: list[Solution], generation: int) -> list[Solution]:
+    def _update_population(self, population: list[Solution], pbest: list[Solution], generation: int) -> PopulationUpdateResult:
         if not self.parallelism.enabled or self.parallelism.particle_update_max_concurrent <= 1:
             next_population = []
-            guided_diagnostics: list[dict[str, Any]] | None = (
-                [] if self.mopso.guided_candidate_diagnostics_enabled else None
-            )
+            guided_diagnostics: list[dict[str, Any]] = []
             for index, particle in enumerate(population):
                 leader = self.archive.select_leader(self.mopso.leader_tournament_size)
                 updated = self._update_particle(
@@ -381,9 +391,11 @@ class BinaryMOPSOCDEngine:
                     guided_diagnostics_sink=guided_diagnostics,
                 )
                 next_population.append(updated)
-            if guided_diagnostics is not None:
-                self._write_guided_candidate_diagnostics(guided_diagnostics)
-            return next_population
+            self._write_guided_candidate_diagnostics(guided_diagnostics)
+            return PopulationUpdateResult(
+                next_population,
+                self._guided_candidate_rejection_count(guided_diagnostics),
+            )
         leaders = [self.archive.select_leader(self.mopso.leader_tournament_size) for _particle in population]
         jobs = [
             ParticleUpdateJob(
@@ -403,12 +415,11 @@ class BinaryMOPSOCDEngine:
             )
         )
         results.sort(key=lambda result: result.index)
+        guided_diagnostics = [row for result in results for row in result.guided_candidate_diagnostics]
         self._write_optimization_rejections(
             [row for result in results for row in result.optimization_rejections]
         )
-        self._write_guided_candidate_diagnostics(
-            [row for result in results for row in result.guided_candidate_diagnostics]
-        )
+        self._write_guided_candidate_diagnostics(guided_diagnostics)
         self._write_particle_update_errors(
             [
                 {
@@ -422,7 +433,10 @@ class BinaryMOPSOCDEngine:
                 if result.error is not None
             ]
         )
-        return [result.solution for result in results]
+        return PopulationUpdateResult(
+            [result.solution for result in results],
+            self._guided_candidate_rejection_count(guided_diagnostics),
+        )
 
     async def _update_particle_job_async(self, job: ParticleUpdateJob) -> ParticleUpdateResult:
         rng = Random(particle_update_seed(self.config.seed, job.generation, job.index))
@@ -837,7 +851,7 @@ class BinaryMOPSOCDEngine:
         generation: int,
         diagnostics_sink: list[dict[str, Any]] | None,
     ) -> dict[str, Any] | None:
-        if diagnostics_sink is None or not self.mopso.guided_candidate_diagnostics_enabled:
+        if diagnostics_sink is None:
             return None
         return {
             "phase": "optimization",
@@ -993,7 +1007,6 @@ class BinaryMOPSOCDEngine:
         if (
             diagnostic_context is not None
             and diagnostics_sink is not None
-            and self.mopso.guided_candidate_diagnostics_enabled
         ):
             return self._select_guided_candidate_with_diagnostics(
                 component,
@@ -1247,12 +1260,21 @@ class BinaryMOPSOCDEngine:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _write_guided_candidate_diagnostics(self, rows: list[dict[str, Any]]) -> None:
-        if not rows:
+        if not rows or not self.mopso.guided_candidate_diagnostics_enabled:
             return
         path = self.outdir / "guided_candidate_diagnostics.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def _guided_candidate_rejection_count(rows: list[dict[str, Any]]) -> int:
+        total = 0
+        for row in rows:
+            counts = row.get("rejected_count_by_reason", {})
+            if isinstance(counts, dict):
+                total += sum(int(value) for value in counts.values())
+        return total
 
     def _write_particle_update_errors(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -1262,7 +1284,13 @@ class BinaryMOPSOCDEngine:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    def _generation_metrics(self, generation: int, population: list[Solution], modified_count: int) -> dict[str, Any]:
+    def _generation_metrics(
+        self,
+        generation: int,
+        population: list[Solution],
+        modified_count: int,
+        guided_candidate_rejections: int,
+    ) -> dict[str, Any]:
         f1 = [solution.objectives.f1 for solution in population if solution.objectives]
         f2 = [solution.objectives.f2 for solution in population if solution.objectives]
         mo_metrics = archive_metrics(self.archive.solutions)
@@ -1283,7 +1311,7 @@ class BinaryMOPSOCDEngine:
                 1 for solution in population if solution.changed and solution.metadata.get("used_central_anchors") is not True
             ),
             "hypervolume": mo_metrics["hypervolume"],
-            "spread": mo_metrics["spread"],
+            "guided_candidate_rejections": guided_candidate_rejections,
         }
 
     def _write_archive_history(self, generation: int) -> None:

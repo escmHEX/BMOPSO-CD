@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import math
-
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
-from binary_mopso_cd.metrics import archive_metrics, calculate_hypervolume, calculate_spread, normalized_objective_point
+from binary_mopso_cd.metrics import archive_metrics, calculate_hypervolume, normalized_objective_point
 from binary_mopso_cd.progress import ProgressLogger
 
 
@@ -16,16 +14,10 @@ def solution(f1: float, f2: float, idx: int) -> Solution:
     )
 
 
-def test_hypervolume_and_spread_follow_local_convention():
+def test_hypervolume_follows_local_convention():
     points = [(0.2, 0.9), (0.5, 0.6), (0.9, 0.2)]
-    distances = [math.dist(points[0], points[1]), math.dist(points[1], points[2])]
-    mean_distance = sum(distances) / len(distances)
-    expected_spread = sum(abs(distance - mean_distance) for distance in distances) / (
-        len(distances) * mean_distance
-    )
 
     assert calculate_hypervolume(points) == 0.44
-    assert math.isclose(calculate_spread(points), expected_spread)
 
 
 def test_archive_metrics_normalize_fidelity_and_cosine_distance_diversity():
@@ -33,7 +25,7 @@ def test_archive_metrics_normalize_fidelity_and_cosine_distance_diversity():
 
     assert normalized_objective_point(solution(-1.0, 1.5, 1)) == (0.0, 0.75)
     assert metrics["hypervolume"] == 0.25
-    assert metrics["spread"] is None
+    assert "spread" not in metrics
 
 
 def test_progress_logger_writes_generation_line(test_config, tmp_path):
@@ -47,7 +39,7 @@ def test_progress_logger_writes_generation_line(test_config, tmp_path):
         population_size=4,
         archive_size=5,
         hypervolume=0.25,
-        spread=None,
+        guided_candidate_rejections=7,
         archive_update_count=2,
         archive_prune_count=1,
     )
@@ -58,7 +50,8 @@ def test_progress_logger_writes_generation_line(test_config, tmp_path):
     assert "modified=3/4" in text
     assert "archive=5" in text
     assert "hv=0.250000" in text
-    assert "spread=NA" in text
+    assert "spread=" not in text
+    assert "guided_candidate_rejections=7" in text
     assert "archive_updates=2" in text
     assert "archive_prunes=1" in text
 

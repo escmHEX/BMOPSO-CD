@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 from binary_mopso_cd.entities import Solution
 
 
@@ -50,20 +48,8 @@ def calculate_hypervolume(points: list[tuple[float, float]]) -> float | None:
     return clamp(hypervolume, 0.0, 1.0)
 
 
-def calculate_spread(points: list[tuple[float, float]]) -> float | None:
-    front = pareto_points(points)
-    if len(front) < 3:
-        return None
-    distances = [math.dist(front[index - 1], front[index]) for index in range(1, len(front))]
-    mean_distance = sum(distances) / len(distances)
-    if mean_distance <= 0:
-        return 0.0
-    return sum(abs(distance - mean_distance) for distance in distances) / (len(distances) * mean_distance)
-
-
 def archive_metrics(solutions: list[Solution]) -> dict[str, float | None]:
     points = [point for solution in solutions for point in [normalized_objective_point(solution)] if point is not None]
     return {
         "hypervolume": calculate_hypervolume(points),
-        "spread": calculate_spread(points),
     }
