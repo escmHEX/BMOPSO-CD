@@ -341,6 +341,9 @@ class RuntimeConfig:
         guided_trajectory_validation_enabled = self.get("mopso.guided_trajectory_validation_enabled", True)
         if not isinstance(guided_trajectory_validation_enabled, bool):
             raise ValueError("mopso.guided_trajectory_validation_enabled must be boolean")
+        guided_candidate_diagnostics_enabled = self.get("mopso.guided_candidate_diagnostics_enabled", True)
+        if not isinstance(guided_candidate_diagnostics_enabled, bool):
+            raise ValueError("mopso.guided_candidate_diagnostics_enabled must be boolean")
         p_anchor_min = float(self.get("mopso.p_anchor_min", 0.05))
         p_anchor_max = float(self.get("mopso.p_anchor_max", 0.70))
         if p_anchor_min > p_anchor_max:

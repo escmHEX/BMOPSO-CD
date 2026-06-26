@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from random import Random
 
@@ -229,7 +230,27 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
         solution.generated_text = f"updated {job.index}"
         if job.index == 1:
             return ParticleUpdateResult(job.index, solution, error="worker failed")
-        return ParticleUpdateResult(job.index, solution)
+        return ParticleUpdateResult(
+            job.index,
+            solution,
+            guided_candidate_diagnostics=(
+                {
+                    "phase": "optimization",
+                    "generation": job.generation,
+                    "solution_id": solution.solution_id,
+                    "component": "topic",
+                    "mode": "cognitive",
+                    "effective_mode": "cognitive",
+                    "used_inertia": False,
+                    "current": "topic 1",
+                    "target": "topic 1",
+                    "raw_candidate_count": 0,
+                    "accepted_candidate": None,
+                    "rejected_count_by_reason": {},
+                    "candidates": [],
+                },
+            ),
+        )
 
     engine._update_particle_job_async = synthetic_update
 
@@ -238,6 +259,11 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
     assert [solution.generated_text for solution in updated] == ["updated 0", "updated 1"]
     error_log = (tmp_path / "particle_update_errors.jsonl").read_text(encoding="utf-8")
     assert "worker failed" in error_log
+    diagnostics = [
+        json.loads(line)
+        for line in (tmp_path / "guided_candidate_diagnostics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert diagnostics[0]["solution_id"] == population[0].solution_id
 
 
 def test_external_archive_deduplicates_by_normalized_signature():
@@ -453,6 +479,289 @@ def test_mopso_guided_candidate_uses_configurable_trajectory_margin(test_config,
     result = engine._select_guided_candidate("topic", "current topic", "target topic", ["wide candidate"])
 
     assert result == "wide candidate"
+
+
+def test_mopso_guided_candidate_diagnostics_report_basic_and_duplicate_reasons(test_config, tmp_path):
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [0.0, 1.0, 0.0],
+            "valid topic": [0.2, math.sqrt(0.96), 0.0],
+            "memory topic": [0.6, 0.8, 0.0],
+            "semantic duplicate topic": [0.6, 0.8, 0.0],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.component_memory.add_components({"topic": ["memory topic"]})
+    diagnostics = []
+
+    result = engine._select_guided_candidate(
+        "topic",
+        "current topic",
+        "target topic",
+        [
+            "",
+            "current topic",
+            "target topic",
+            "one two three four five six seven eight nine",
+            "valid topic",
+            " valid topic ",
+            "semantic duplicate topic",
+        ],
+        diagnostic_context={
+            "phase": "optimization",
+            "generation": 1,
+            "solution_id": "solution-1",
+            "mode": "cognitive",
+            "effective_mode": "cognitive",
+            "used_inertia": False,
+        },
+        diagnostics_sink=diagnostics,
+    )
+
+    assert result == "valid topic"
+    row = diagnostics[0]
+    assert row["raw_candidate_count"] == 7
+    assert row["accepted_candidate"] == "valid topic"
+    assert row["rejected_count_by_reason"] == {
+        "empty_candidate": 1,
+        "duplicate_candidate_output": 1,
+        "literal_copy_current": 1,
+        "literal_copy_target": 1,
+        "too_many_words": 1,
+        "semantic_duplicate": 1,
+    }
+    assert row["candidates"][0] == {"candidate": "", "reason": "empty_candidate"}
+    assert any(
+        item == {"candidate": " valid topic ", "reason": "duplicate_candidate_output"}
+        for item in row["candidates"]
+    )
+
+
+def test_mopso_guided_candidate_diagnostics_report_no_semantic_progress(test_config, tmp_path):
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [0.0, 1.0, 0.0],
+            "away topic": [1.0, 0.0, 0.0],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    diagnostics = []
+
+    result = engine._select_guided_candidate(
+        "topic",
+        "current topic",
+        "target topic",
+        ["away topic"],
+        diagnostic_context={
+            "phase": "optimization",
+            "generation": 1,
+            "solution_id": "solution-1",
+            "mode": "cognitive",
+            "effective_mode": "cognitive",
+            "used_inertia": False,
+        },
+        diagnostics_sink=diagnostics,
+    )
+
+    assert result is None
+    assert diagnostics[0]["rejected_count_by_reason"] == {"no_semantic_progress": 1}
+    assert diagnostics[0]["candidates"] == [{"candidate": "away topic", "reason": "no_semantic_progress"}]
+
+
+def test_mopso_guided_candidate_diagnostics_report_trajectory_inconsistency(test_config, tmp_path):
+    candidate_x = math.cos(math.radians(80.0))
+    candidate_y = 0.5
+    candidate_z = math.sqrt(1.0 - candidate_x**2 - candidate_y**2)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [math.cos(math.radians(60.0)), math.sin(math.radians(60.0)), 0.0],
+            "wide candidate": [candidate_x, candidate_y, candidate_z],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    diagnostics = []
+
+    result = engine._select_guided_candidate(
+        "topic",
+        "current topic",
+        "target topic",
+        ["wide candidate"],
+        diagnostic_context={
+            "phase": "optimization",
+            "generation": 1,
+            "solution_id": "solution-1",
+            "mode": "cognitive",
+            "effective_mode": "cognitive",
+            "used_inertia": False,
+        },
+        diagnostics_sink=diagnostics,
+    )
+
+    assert result is None
+    assert diagnostics[0]["rejected_count_by_reason"] == {"guided_trajectory_inconsistent": 1}
+    assert diagnostics[0]["candidates"] == [
+        {"candidate": "wide candidate", "reason": "guided_trajectory_inconsistent"}
+    ]
+
+
+def test_mopso_guided_candidate_diagnostics_preserve_best_valid_selection(test_config, tmp_path):
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "current topic": [1.0, 0.0, 0.0],
+            "target topic": [0.0, 1.0, 0.0],
+            "weaker topic": [0.8, 0.6, 0.0],
+            "stronger topic": [0.2, math.sqrt(0.96), 0.0],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    diagnostics = []
+
+    result = engine._select_guided_candidate(
+        "topic",
+        "current topic",
+        "target topic",
+        ["weaker topic", "stronger topic"],
+        diagnostic_context={
+            "phase": "optimization",
+            "generation": 1,
+            "solution_id": "solution-1",
+            "mode": "cognitive",
+            "effective_mode": "cognitive",
+            "used_inertia": False,
+        },
+        diagnostics_sink=diagnostics,
+    )
+
+    assert result == "stronger topic"
+    assert diagnostics[0]["accepted_candidate"] == "stronger topic"
+    assert diagnostics[0]["rejected_count_by_reason"] == {}
+
+
+def test_mopso_update_writes_guided_candidate_diagnostics(test_config, tmp_path):
+    test_config.set("parallelism.enabled", False)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    executor = GuidedMoveExecutor(["updated topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generate_text = lambda _prompt, **_kwargs: "valid generated text"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text", Objectives(0.6, 0.6))
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text", Objectives(0.7, 0.7))
+    engine.archive.solutions = [leader]
+
+    updated = engine._update_population([particle], [pbest], generation=1)
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "guided_candidate_diagnostics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert updated[0].vector.components["topic"] == "updated topic"
+    assert row["phase"] == "optimization"
+    assert row["generation"] == 1
+    assert row["solution_id"] == particle.solution_id
+    assert row["component"] == "topic"
+    assert row["mode"] == "cognitive"
+    assert row["effective_mode"] == "cognitive"
+    assert row["used_inertia"] is False
+    assert row["current"] == "current topic"
+    assert row["target"] == "pbest topic"
+    assert row["raw_candidate_count"] == 1
+    assert row["accepted_candidate"] == "updated topic"
+    assert row["rejected_count_by_reason"] == {}
+    assert row["candidates"] == []
+
+
+def test_mopso_update_skips_guided_candidate_diagnostics_when_disabled(test_config, tmp_path):
+    test_config.set("parallelism.enabled", False)
+    test_config.set("mopso.guided_candidate_diagnostics_enabled", False)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    executor = GuidedMoveExecutor(["updated topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generate_text = lambda _prompt, **_kwargs: "valid generated text"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text", Objectives(0.6, 0.6))
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text", Objectives(0.7, 0.7))
+    engine.archive.solutions = [leader]
+
+    engine._update_population([particle], [pbest], generation=1)
+
+    assert not (tmp_path / "guided_candidate_diagnostics.jsonl").exists()
 
 
 def test_mopso_text_generation_uses_base_prompt_and_checkpoint_persists_anchors(test_config, tmp_path):
@@ -781,6 +1090,53 @@ def test_mopso_inertia_repeats_last_social_move_toward_previous_target(test_conf
 
     assert result == "leader aligned topic"
     assert executor.executed_task.task_params["targetComponent"] == "leader topic"
+
+
+def test_mopso_inertia_guided_candidate_diagnostics_use_resolved_target(test_config, tmp_path):
+    test_config.set("experiment.iterations", 2)
+    executor = GuidedMoveExecutor(["leader aligned topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "prompt",
+        "text",
+        last_guided_move={
+            "topic": {
+                "movement": "social",
+                "target_position": {"topic": "leader topic"},
+                "accepted_component": "previous accepted topic",
+                "iteration": 1,
+            }
+        },
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text")
+    leader = Solution(SemanticVector({"topic": "new leader topic"}), "prompt", "text")
+    diagnostics = []
+
+    result = engine._candidate_for_mode(
+        "topic",
+        "inertia",
+        particle,
+        pbest,
+        leader,
+        generation=2,
+        guided_diagnostics_sink=diagnostics,
+    )
+
+    assert result == "leader aligned topic"
+    row = diagnostics[0]
+    assert row["mode"] == "inertia"
+    assert row["effective_mode"] == "social"
+    assert row["used_inertia"] is True
+    assert row["target"] == "leader topic"
+    assert row["accepted_candidate"] == "leader aligned topic"
 
 
 def test_mopso_inertia_consumes_memory_without_creating_new_chain(test_config, tmp_path):

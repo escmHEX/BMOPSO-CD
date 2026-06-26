@@ -38,6 +38,14 @@ from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, s
 SolutionSignature = tuple[tuple[str, str], ...]
 GUIDED_MOVES = {"cognitive", "social"}
 GUIDED_TRAJECTORY_EPSILON = 1e-8
+REASON_EMPTY_CANDIDATE = "empty_candidate"
+REASON_DUPLICATE_CANDIDATE_OUTPUT = "duplicate_candidate_output"
+REASON_LITERAL_COPY_CURRENT = "literal_copy_current"
+REASON_LITERAL_COPY_TARGET = "literal_copy_target"
+REASON_TOO_MANY_WORDS = "too_many_words"
+REASON_SEMANTIC_DUPLICATE = "semantic_duplicate"
+REASON_NO_SEMANTIC_PROGRESS = "no_semantic_progress"
+REASON_GUIDED_TRAJECTORY_INCONSISTENT = "guided_trajectory_inconsistent"
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -211,6 +219,7 @@ class ParticleUpdateResult:
     solution: Solution
     error: str | None = None
     optimization_rejections: tuple[dict[str, Any], ...] = ()
+    guided_candidate_diagnostics: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,10 +368,21 @@ class BinaryMOPSOCDEngine:
     def _update_population(self, population: list[Solution], pbest: list[Solution], generation: int) -> list[Solution]:
         if not self.parallelism.enabled or self.parallelism.particle_update_max_concurrent <= 1:
             next_population = []
+            guided_diagnostics: list[dict[str, Any]] | None = (
+                [] if self.mopso.guided_candidate_diagnostics_enabled else None
+            )
             for index, particle in enumerate(population):
                 leader = self.archive.select_leader(self.mopso.leader_tournament_size)
-                updated = self._update_particle(particle, pbest[index], leader, generation)
+                updated = self._update_particle(
+                    particle,
+                    pbest[index],
+                    leader,
+                    generation,
+                    guided_diagnostics_sink=guided_diagnostics,
+                )
                 next_population.append(updated)
+            if guided_diagnostics is not None:
+                self._write_guided_candidate_diagnostics(guided_diagnostics)
             return next_population
         leaders = [self.archive.select_leader(self.mopso.leader_tournament_size) for _particle in population]
         jobs = [
@@ -386,6 +406,9 @@ class BinaryMOPSOCDEngine:
         self._write_optimization_rejections(
             [row for result in results for row in result.optimization_rejections]
         )
+        self._write_guided_candidate_diagnostics(
+            [row for result in results for row in result.guided_candidate_diagnostics]
+        )
         self._write_particle_update_errors(
             [
                 {
@@ -404,6 +427,7 @@ class BinaryMOPSOCDEngine:
     async def _update_particle_job_async(self, job: ParticleUpdateJob) -> ParticleUpdateResult:
         rng = Random(particle_update_seed(self.config.seed, job.generation, job.index))
         rejections: list[dict[str, Any]] = []
+        guided_diagnostics: list[dict[str, Any]] = []
         try:
             solution = await self._update_particle_async(
                 job.particle,
@@ -412,13 +436,25 @@ class BinaryMOPSOCDEngine:
                 job.generation,
                 rng=rng,
                 rejection_sink=rejections,
+                guided_diagnostics_sink=guided_diagnostics,
             )
-            return ParticleUpdateResult(job.index, solution, optimization_rejections=tuple(rejections))
+            return ParticleUpdateResult(
+                job.index,
+                solution,
+                optimization_rejections=tuple(rejections),
+                guided_candidate_diagnostics=tuple(guided_diagnostics),
+            )
         except Exception as exc:
             fallback = job.particle.clone(keep_id=True)
             fallback.changed = False
             fallback.generation = job.generation
-            return ParticleUpdateResult(job.index, fallback, error=str(exc), optimization_rejections=tuple(rejections))
+            return ParticleUpdateResult(
+                job.index,
+                fallback,
+                error=str(exc),
+                optimization_rejections=tuple(rejections),
+                guided_candidate_diagnostics=tuple(guided_diagnostics),
+            )
 
     def _update_particle(
         self,
@@ -428,6 +464,7 @@ class BinaryMOPSOCDEngine:
         generation: int,
         rng: Random | None = None,
         rejection_sink: list[dict[str, Any]] | None = None,
+        guided_diagnostics_sink: list[dict[str, Any]] | None = None,
     ) -> Solution:
         rng = rng or self.rng
         updated = particle.clone(keep_id=True)
@@ -472,7 +509,16 @@ class BinaryMOPSOCDEngine:
             context = self._movement_context(component, mode, updated, pbest, leader, generation)
             if context is None:
                 continue
-            replacement = self._candidate_for_mode(component, mode, updated, pbest, leader, generation, rng)
+            replacement = self._candidate_for_mode(
+                component,
+                mode,
+                updated,
+                pbest,
+                leader,
+                generation,
+                rng,
+                guided_diagnostics_sink,
+            )
             if context.used_inertia:
                 updated.last_guided_move.pop(component, None)
             if replacement:
@@ -541,6 +587,7 @@ class BinaryMOPSOCDEngine:
         generation: int,
         rng: Random,
         rejection_sink: list[dict[str, Any]],
+        guided_diagnostics_sink: list[dict[str, Any]] | None = None,
     ) -> Solution:
         updated = particle.clone(keep_id=True)
         updated.changed = False
@@ -584,7 +631,16 @@ class BinaryMOPSOCDEngine:
             context = self._movement_context(component, mode, updated, pbest, leader, generation)
             if context is None:
                 continue
-            replacement = await self._candidate_for_mode_async(component, mode, updated, pbest, leader, generation, rng)
+            replacement = await self._candidate_for_mode_async(
+                component,
+                mode,
+                updated,
+                pbest,
+                leader,
+                generation,
+                rng,
+                guided_diagnostics_sink,
+            )
             if context.used_inertia:
                 updated.last_guided_move.pop(component, None)
             if replacement:
@@ -689,6 +745,7 @@ class BinaryMOPSOCDEngine:
         leader: Solution,
         generation: int,
         rng: Random | None = None,
+        guided_diagnostics_sink: list[dict[str, Any]] | None = None,
     ) -> str | None:
         current = particle.vector.components[component]
         context = self._movement_context(component, mode, particle, pbest, leader, generation)
@@ -704,7 +761,23 @@ class BinaryMOPSOCDEngine:
             self._influence_task_params(component, current, target, particle, generation),
         )
         raw_candidates = list(self.executor.execute(self.router.route(route)))
-        return self._select_guided_candidate(component, current, target, raw_candidates)
+        return self._select_guided_candidate(
+            component,
+            current,
+            target,
+            raw_candidates,
+            diagnostic_context=self._guided_candidate_diagnostic_context(
+                component,
+                mode,
+                context,
+                current,
+                target,
+                particle,
+                generation,
+                guided_diagnostics_sink,
+            ),
+            diagnostics_sink=guided_diagnostics_sink,
+        )
 
     async def _candidate_for_mode_async(
         self,
@@ -715,6 +788,7 @@ class BinaryMOPSOCDEngine:
         leader: Solution,
         generation: int,
         rng: Random,
+        guided_diagnostics_sink: list[dict[str, Any]] | None = None,
     ) -> str | None:
         current = particle.vector.components[component]
         context = self._movement_context(component, mode, particle, pbest, leader, generation)
@@ -734,7 +808,48 @@ class BinaryMOPSOCDEngine:
             raw_candidates = list(await self.executor.execute_async(routed))
         else:
             raw_candidates = list(self.executor.execute(routed))
-        return self._select_guided_candidate(component, current, target, raw_candidates)
+        return self._select_guided_candidate(
+            component,
+            current,
+            target,
+            raw_candidates,
+            diagnostic_context=self._guided_candidate_diagnostic_context(
+                component,
+                mode,
+                context,
+                current,
+                target,
+                particle,
+                generation,
+                guided_diagnostics_sink,
+            ),
+            diagnostics_sink=guided_diagnostics_sink,
+        )
+
+    def _guided_candidate_diagnostic_context(
+        self,
+        component: str,
+        mode: str,
+        context: MovementContext,
+        current: str,
+        target: str,
+        particle: Solution,
+        generation: int,
+        diagnostics_sink: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        if diagnostics_sink is None or not self.mopso.guided_candidate_diagnostics_enabled:
+            return None
+        return {
+            "phase": "optimization",
+            "generation": generation,
+            "solution_id": particle.solution_id,
+            "component": component,
+            "mode": mode,
+            "effective_mode": context.effective_mode,
+            "used_inertia": context.used_inertia,
+            "current": current,
+            "target": target,
+        }
 
     def _effective_candidate_mode(
         self,
@@ -872,7 +987,22 @@ class BinaryMOPSOCDEngine:
         current: str,
         target: str,
         raw_candidates: list[str],
+        diagnostic_context: dict[str, Any] | None = None,
+        diagnostics_sink: list[dict[str, Any]] | None = None,
     ) -> str | None:
+        if (
+            diagnostic_context is not None
+            and diagnostics_sink is not None
+            and self.mopso.guided_candidate_diagnostics_enabled
+        ):
+            return self._select_guided_candidate_with_diagnostics(
+                component,
+                current,
+                target,
+                raw_candidates,
+                diagnostic_context,
+                diagnostics_sink,
+            )
         candidates = self._basic_candidates(component, current, raw_candidates, forbidden=target)
         if not candidates:
             return None
@@ -895,6 +1025,64 @@ class BinaryMOPSOCDEngine:
             return None
         best_idx = int(valid_indices[np.argmax(target_sims[valid_indices])])
         return candidates[best_idx]
+
+    def _select_guided_candidate_with_diagnostics(
+        self,
+        component: str,
+        current: str,
+        target: str,
+        raw_candidates: list[str],
+        diagnostic_context: dict[str, Any],
+        diagnostics_sink: list[dict[str, Any]],
+    ) -> str | None:
+        candidates, rejected_candidates = self._basic_candidates_with_diagnostics(
+            component,
+            current,
+            raw_candidates,
+            forbidden=target,
+        )
+        accepted_candidate: str | None = None
+        if candidates:
+            candidate_embeddings = self.executor.embedding_service.encode(candidates, text_type="component")
+            duplicate_sims = self.component_memory.max_similarity(component, candidate_embeddings)
+            target_embeddings = self.executor.embedding_service.encode([current, target], text_type="component")
+            before = float(target_embeddings[0] @ target_embeddings[1])
+            target_sims = candidate_embeddings @ target_embeddings[1]
+            duplicate_mask = duplicate_sims < self.mopso.tau_dup
+            progress_mask = target_sims > before
+            trajectory_mask = np.ones(len(candidates), dtype=bool)
+            if self.mopso.guided_trajectory_validation_enabled:
+                current_sims = candidate_embeddings @ target_embeddings[0]
+                trajectory_mask = guided_trajectory_consistency_mask(
+                    before,
+                    current_sims,
+                    target_sims,
+                    self.mopso.guided_trajectory_relative_margin,
+                )
+            valid_mask = duplicate_mask & progress_mask & trajectory_mask
+            for index, candidate in enumerate(candidates):
+                reason = None
+                if not bool(duplicate_mask[index]):
+                    reason = REASON_SEMANTIC_DUPLICATE
+                elif not bool(progress_mask[index]):
+                    reason = REASON_NO_SEMANTIC_PROGRESS
+                elif self.mopso.guided_trajectory_validation_enabled and not bool(trajectory_mask[index]):
+                    reason = REASON_GUIDED_TRAJECTORY_INCONSISTENT
+                if reason is not None:
+                    rejected_candidates.append({"candidate": candidate, "reason": reason})
+            valid_indices = np.where(valid_mask)[0]
+            if valid_indices.size > 0:
+                best_idx = int(valid_indices[np.argmax(target_sims[valid_indices])])
+                accepted_candidate = candidates[best_idx]
+        self._append_guided_candidate_diagnostics(
+            component,
+            raw_candidates,
+            accepted_candidate,
+            rejected_candidates,
+            diagnostic_context,
+            diagnostics_sink,
+        )
+        return accepted_candidate
 
     def _select_turbulence_candidate(self, component: str, current: str, raw_candidates: list[str]) -> str | None:
         candidates = self._basic_candidates(component, current, raw_candidates, forbidden=None)
@@ -938,6 +1126,62 @@ class BinaryMOPSOCDEngine:
             seen.add(key)
             result.append(text)
         return result
+
+    def _basic_candidates_with_diagnostics(
+        self,
+        component: str,
+        current: str,
+        raw_candidates: list[str],
+        forbidden: str | None,
+    ) -> tuple[list[str], list[dict[str, str]]]:
+        result: list[str] = []
+        rejected: list[dict[str, str]] = []
+        seen: set[str] = set()
+        current_key = canonical_text(current)
+        forbidden_key = canonical_text(forbidden) if forbidden is not None else None
+        max_words = self.components.max_words[component]
+        for candidate in raw_candidates:
+            raw_text = str(candidate)
+            text = raw_text.strip()
+            key = canonical_text(text)
+            reason = None
+            if not key:
+                reason = REASON_EMPTY_CANDIDATE
+            elif key in seen:
+                reason = REASON_DUPLICATE_CANDIDATE_OUTPUT
+            elif key == current_key:
+                reason = REASON_LITERAL_COPY_CURRENT
+            elif forbidden_key is not None and key == forbidden_key:
+                reason = REASON_LITERAL_COPY_TARGET
+            elif word_count(text) > max_words:
+                reason = REASON_TOO_MANY_WORDS
+            if reason is not None:
+                rejected.append({"candidate": raw_text, "reason": reason})
+                continue
+            seen.add(key)
+            result.append(text)
+        return result, rejected
+
+    @staticmethod
+    def _append_guided_candidate_diagnostics(
+        component: str,
+        raw_candidates: list[str],
+        accepted_candidate: str | None,
+        rejected_candidates: list[dict[str, str]],
+        diagnostic_context: dict[str, Any],
+        diagnostics_sink: list[dict[str, Any]],
+    ) -> None:
+        rejected_count_by_reason: dict[str, int] = {}
+        for item in rejected_candidates:
+            reason = item["reason"]
+            rejected_count_by_reason[reason] = rejected_count_by_reason.get(reason, 0) + 1
+        row = dict(diagnostic_context)
+        row["component"] = component
+        row["raw_candidate_count"] = len(raw_candidates)
+        row["accepted_candidate"] = accepted_candidate
+        row["rejected_count_by_reason"] = rejected_count_by_reason
+        row["candidates"] = rejected_candidates
+        diagnostics_sink.append(row)
 
     def _render_prompt(self, vector: SemanticVector) -> str:
         route = RouteTask(
@@ -998,6 +1242,14 @@ class BinaryMOPSOCDEngine:
         if not rows:
             return
         path = self.outdir / "optimization_rejections.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _write_guided_candidate_diagnostics(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        path = self.outdir / "guided_candidate_diagnostics.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")

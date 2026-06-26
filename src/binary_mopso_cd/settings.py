@@ -68,6 +68,7 @@ class MOPSOSettings:
     tau_tur_max: float
     guided_trajectory_validation_enabled: bool
     guided_trajectory_relative_margin: float
+    guided_candidate_diagnostics_enabled: bool
     utility_weights: dict[str, float]
 
     @classmethod
@@ -93,6 +94,7 @@ class MOPSOSettings:
             tau_tur_max=float(config.get("mopso.tau_tur_max", 0.90)),
             guided_trajectory_validation_enabled=config.get("mopso.guided_trajectory_validation_enabled", True) is True,
             guided_trajectory_relative_margin=float(config.get("mopso.guided_trajectory_relative_margin", 0.40)),
+            guided_candidate_diagnostics_enabled=config.get("mopso.guided_candidate_diagnostics_enabled", True) is True,
             utility_weights=dict(config.get("mopso.utility_weights", {"f1": 0.5, "f2": 0.5})),
         )
 

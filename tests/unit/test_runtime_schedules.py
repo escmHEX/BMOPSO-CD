@@ -65,6 +65,7 @@ def test_mopso_default_hyperparameters_match_strategy(test_config):
     assert settings.p_anchor_max == 0.40
     assert settings.guided_trajectory_validation_enabled is True
     assert settings.guided_trajectory_relative_margin == pytest.approx(0.40)
+    assert settings.guided_candidate_diagnostics_enabled is True
 
 
 def test_parallelism_defaults_match_strategy(test_config):
@@ -119,6 +120,21 @@ def test_guided_trajectory_relative_margin_is_configurable(test_config):
     settings = MOPSOSettings.from_config(test_config)
 
     assert settings.guided_trajectory_relative_margin == pytest.approx(1.5)
+
+
+def test_guided_candidate_diagnostics_enabled_must_be_boolean(test_config):
+    test_config.set("mopso.guided_candidate_diagnostics_enabled", "false")
+    with pytest.raises(ValueError, match="guided_candidate_diagnostics_enabled"):
+        test_config.validate()
+
+
+def test_guided_candidate_diagnostics_enabled_is_configurable(test_config):
+    test_config.set("mopso.guided_candidate_diagnostics_enabled", False)
+    test_config.validate()
+
+    settings = MOPSOSettings.from_config(test_config)
+
+    assert settings.guided_candidate_diagnostics_enabled is False
 
 
 def test_all_components_can_be_frozen(test_config):
