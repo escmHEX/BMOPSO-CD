@@ -14,7 +14,7 @@ from binary_mopso_cd.async_utils import run_async, run_limited
 from binary_mopso_cd.checkpoint import CheckpointManager
 from binary_mopso_cd.component_memory import ComponentMemoryIndex
 from binary_mopso_cd.component_specs import component_spec
-from binary_mopso_cd.config import RuntimeConfig
+from binary_mopso_cd.config import GUIDED_CANDIDATE_REJECTION_REASONS, RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution, solution_to_dict
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.generated_text_validation import validate_generated_text
@@ -38,14 +38,16 @@ from binary_mopso_cd.utils import canonical_text, progress_ratio, rng_to_text, s
 SolutionSignature = tuple[tuple[str, str], ...]
 GUIDED_MOVES = {"cognitive", "social"}
 GUIDED_TRAJECTORY_EPSILON = 1e-8
-REASON_EMPTY_CANDIDATE = "empty_candidate"
-REASON_DUPLICATE_CANDIDATE_OUTPUT = "duplicate_candidate_output"
-REASON_LITERAL_COPY_CURRENT = "literal_copy_current"
-REASON_LITERAL_COPY_TARGET = "literal_copy_target"
-REASON_TOO_MANY_WORDS = "too_many_words"
-REASON_SEMANTIC_DUPLICATE = "semantic_duplicate"
-REASON_NO_SEMANTIC_PROGRESS = "no_semantic_progress"
-REASON_GUIDED_TRAJECTORY_INCONSISTENT = "guided_trajectory_inconsistent"
+(
+    REASON_EMPTY_CANDIDATE,
+    REASON_DUPLICATE_CANDIDATE_OUTPUT,
+    REASON_LITERAL_COPY_CURRENT,
+    REASON_LITERAL_COPY_TARGET,
+    REASON_TOO_MANY_WORDS,
+    REASON_SEMANTIC_DUPLICATE,
+    REASON_NO_SEMANTIC_PROGRESS,
+    REASON_GUIDED_TRAJECTORY_INCONSISTENT,
+) = GUIDED_CANDIDATE_REJECTION_REASONS
 
 
 def dominates(left: Objectives, right: Objectives) -> bool:
@@ -1267,13 +1269,16 @@ class BinaryMOPSOCDEngine:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    @staticmethod
-    def _guided_candidate_rejection_count(rows: list[dict[str, Any]]) -> int:
+    def _guided_candidate_rejection_count(self, rows: list[dict[str, Any]]) -> int:
         total = 0
         for row in rows:
             counts = row.get("rejected_count_by_reason", {})
             if isinstance(counts, dict):
-                total += sum(int(value) for value in counts.values())
+                total += sum(
+                    int(value)
+                    for reason, value in counts.items()
+                    if self.mopso.guided_candidate_rejection_count_reasons.get(str(reason), False)
+                )
         return total
 
     def _write_particle_update_errors(self, rows: list[dict[str, Any]]) -> None:

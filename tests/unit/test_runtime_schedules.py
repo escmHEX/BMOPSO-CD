@@ -66,6 +66,16 @@ def test_mopso_default_hyperparameters_match_strategy(test_config):
     assert settings.guided_trajectory_validation_enabled is True
     assert settings.guided_trajectory_relative_margin == pytest.approx(0.40)
     assert settings.guided_candidate_diagnostics_enabled is True
+    assert settings.guided_candidate_rejection_count_reasons == {
+        "empty_candidate": False,
+        "duplicate_candidate_output": False,
+        "literal_copy_current": False,
+        "literal_copy_target": False,
+        "too_many_words": False,
+        "semantic_duplicate": False,
+        "no_semantic_progress": False,
+        "guided_trajectory_inconsistent": True,
+    }
 
 
 def test_parallelism_defaults_match_strategy(test_config):
@@ -135,6 +145,35 @@ def test_guided_candidate_diagnostics_enabled_is_configurable(test_config):
     settings = MOPSOSettings.from_config(test_config)
 
     assert settings.guided_candidate_diagnostics_enabled is False
+
+
+def test_guided_candidate_rejection_count_reasons_must_be_mapping(test_config):
+    test_config.set("mopso.guided_candidate_rejection_count_reasons", ["guided_trajectory_inconsistent"])
+    with pytest.raises(ValueError, match="guided_candidate_rejection_count_reasons"):
+        test_config.validate()
+
+
+def test_guided_candidate_rejection_count_reasons_must_be_boolean(test_config):
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.no_semantic_progress", "true")
+    with pytest.raises(ValueError, match="guided_candidate_rejection_count_reasons.no_semantic_progress"):
+        test_config.validate()
+
+
+def test_guided_candidate_rejection_count_reasons_rejects_unknown_reason(test_config):
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.unknown_reason", True)
+    with pytest.raises(ValueError, match="unknown_reason"):
+        test_config.validate()
+
+
+def test_guided_candidate_rejection_count_reasons_are_configurable(test_config):
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.no_semantic_progress", True)
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.guided_trajectory_inconsistent", False)
+    test_config.validate()
+
+    settings = MOPSOSettings.from_config(test_config)
+
+    assert settings.guided_candidate_rejection_count_reasons["no_semantic_progress"] is True
+    assert settings.guided_candidate_rejection_count_reasons["guided_trajectory_inconsistent"] is False
 
 
 def test_all_components_can_be_frozen(test_config):

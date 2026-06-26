@@ -12,6 +12,20 @@ DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 DISABLED_THINKING_STRINGS = {"", "false", "0", "no", "none", "null"}
 ENABLED_THINKING_STRINGS = {"true", "1", "yes"}
 OLLAMA_THINKING_LEVELS = {"low", "medium", "high"}
+GUIDED_CANDIDATE_REJECTION_REASONS = (
+    "empty_candidate",
+    "duplicate_candidate_output",
+    "literal_copy_current",
+    "literal_copy_target",
+    "too_many_words",
+    "semantic_duplicate",
+    "no_semantic_progress",
+    "guided_trajectory_inconsistent",
+)
+DEFAULT_GUIDED_CANDIDATE_REJECTION_COUNT_REASONS = {
+    reason: reason == "guided_trajectory_inconsistent"
+    for reason in GUIDED_CANDIDATE_REJECTION_REASONS
+}
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -344,6 +358,22 @@ class RuntimeConfig:
         guided_candidate_diagnostics_enabled = self.get("mopso.guided_candidate_diagnostics_enabled", True)
         if not isinstance(guided_candidate_diagnostics_enabled, bool):
             raise ValueError("mopso.guided_candidate_diagnostics_enabled must be boolean")
+        guided_candidate_rejection_count_reasons = self.get(
+            "mopso.guided_candidate_rejection_count_reasons",
+            DEFAULT_GUIDED_CANDIDATE_REJECTION_COUNT_REASONS,
+        )
+        if not isinstance(guided_candidate_rejection_count_reasons, dict):
+            raise ValueError("mopso.guided_candidate_rejection_count_reasons must be a mapping")
+        known_reasons = set(GUIDED_CANDIDATE_REJECTION_REASONS)
+        unknown_reasons = set(guided_candidate_rejection_count_reasons).difference(known_reasons)
+        if unknown_reasons:
+            raise ValueError(
+                "mopso.guided_candidate_rejection_count_reasons has unknown reasons: "
+                f"{sorted(unknown_reasons)}"
+            )
+        for reason, enabled in guided_candidate_rejection_count_reasons.items():
+            if not isinstance(enabled, bool):
+                raise ValueError(f"mopso.guided_candidate_rejection_count_reasons.{reason} must be boolean")
         p_anchor_min = float(self.get("mopso.p_anchor_min", 0.05))
         p_anchor_max = float(self.get("mopso.p_anchor_max", 0.70))
         if p_anchor_min > p_anchor_max:

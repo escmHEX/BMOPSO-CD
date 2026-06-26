@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from binary_mopso_cd.config import RuntimeConfig
+from binary_mopso_cd.config import DEFAULT_GUIDED_CANDIDATE_REJECTION_COUNT_REASONS, RuntimeConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +69,20 @@ class MOPSOSettings:
     guided_trajectory_validation_enabled: bool
     guided_trajectory_relative_margin: float
     guided_candidate_diagnostics_enabled: bool
+    guided_candidate_rejection_count_reasons: dict[str, bool]
     utility_weights: dict[str, float]
 
     @classmethod
     def from_config(cls, config: RuntimeConfig) -> "MOPSOSettings":
+        rejection_count_reasons = dict(DEFAULT_GUIDED_CANDIDATE_REJECTION_COUNT_REASONS)
+        rejection_count_reasons.update(
+            dict(
+                config.get(
+                    "mopso.guided_candidate_rejection_count_reasons",
+                    DEFAULT_GUIDED_CANDIDATE_REJECTION_COUNT_REASONS,
+                )
+            )
+        )
         return cls(
             archive_multiplier=float(config.get("mopso.archive_multiplier", 2)),
             leader_tournament_size=int(config.get("mopso.leader_tournament_size", 3)),
@@ -95,6 +105,7 @@ class MOPSOSettings:
             guided_trajectory_validation_enabled=config.get("mopso.guided_trajectory_validation_enabled", True) is True,
             guided_trajectory_relative_margin=float(config.get("mopso.guided_trajectory_relative_margin", 0.40)),
             guided_candidate_diagnostics_enabled=config.get("mopso.guided_candidate_diagnostics_enabled", True) is True,
+            guided_candidate_rejection_count_reasons=rejection_count_reasons,
             utility_weights=dict(config.get("mopso.utility_weights", {"f1": 0.5, "f2": 0.5})),
         )
 

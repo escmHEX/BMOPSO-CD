@@ -247,7 +247,11 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
                     "target": "topic 1",
                     "raw_candidate_count": 0,
                     "accepted_candidate": None,
-                    "rejected_count_by_reason": {"no_semantic_progress": 2, "literal_copy_current": 1},
+                    "rejected_count_by_reason": {
+                        "no_semantic_progress": 2,
+                        "literal_copy_current": 1,
+                        "guided_trajectory_inconsistent": 4,
+                    },
                     "candidates": [],
                 },
             ),
@@ -259,7 +263,7 @@ def test_parallel_update_preserves_particle_order_and_logs_worker_errors(test_co
     assert isinstance(update_result, PopulationUpdateResult)
 
     assert [solution.generated_text for solution in update_result.population] == ["updated 0", "updated 1"]
-    assert update_result.guided_candidate_rejections == 3
+    assert update_result.guided_candidate_rejections == 4
     error_log = (tmp_path / "particle_update_errors.jsonl").read_text(encoding="utf-8")
     assert "worker failed" in error_log
     diagnostics = [
@@ -734,6 +738,47 @@ def test_mopso_update_writes_guided_candidate_diagnostics(test_config, tmp_path)
 def test_mopso_update_skips_guided_candidate_diagnostics_when_disabled(test_config, tmp_path):
     test_config.set("parallelism.enabled", False)
     test_config.set("mopso.guided_candidate_diagnostics_enabled", False)
+    test_config.set("mopso.p_tur_max", 0.0)
+    test_config.set("mopso.p_tur_min", 0.0)
+    executor = GuidedMoveExecutor(["current topic", "updated topic"])
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    engine.components = topic_only_components()
+    engine._guided_mode = lambda *_args: "cognitive"
+    engine._render_prompt = lambda _vector: "new prompt"
+    engine._generate_text = lambda _prompt, **_kwargs: "valid generated text"
+    engine._generated_text_fidelity = lambda _text: 1.0
+    particle = Solution(
+        SemanticVector({"topic": "current topic"}),
+        "old prompt",
+        "old generated",
+        Objectives(0.5, 0.5),
+        velocity={"topic": 4.0},
+        initial_components={"topic": "current topic"},
+        changed=False,
+    )
+    pbest = Solution(SemanticVector({"topic": "pbest topic"}), "prompt", "text", Objectives(0.6, 0.6))
+    leader = Solution(SemanticVector({"topic": "leader topic"}), "prompt", "text", Objectives(0.7, 0.7))
+    engine.archive.solutions = [leader]
+
+    update_result = engine._update_population([particle], [pbest], generation=1)
+
+    assert update_result.population[0].vector.components["topic"] == "updated topic"
+    assert update_result.guided_candidate_rejections == 0
+    assert not (tmp_path / "guided_candidate_diagnostics.jsonl").exists()
+
+
+def test_mopso_update_counts_configured_guided_candidate_rejection_reasons_when_diagnostics_disabled(test_config, tmp_path):
+    test_config.set("parallelism.enabled", False)
+    test_config.set("mopso.guided_candidate_diagnostics_enabled", False)
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.literal_copy_current", True)
+    test_config.set("mopso.guided_candidate_rejection_count_reasons.guided_trajectory_inconsistent", False)
     test_config.set("mopso.p_tur_max", 0.0)
     test_config.set("mopso.p_tur_min", 0.0)
     executor = GuidedMoveExecutor(["current topic", "updated topic"])
