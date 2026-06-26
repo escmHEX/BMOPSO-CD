@@ -1272,13 +1272,15 @@ class BinaryMOPSOCDEngine:
     def _guided_candidate_rejection_count(self, rows: list[dict[str, Any]]) -> int:
         total = 0
         for row in rows:
+            if row.get("accepted_candidate") is not None:
+                continue
             counts = row.get("rejected_count_by_reason", {})
-            if isinstance(counts, dict):
-                total += sum(
-                    int(value)
-                    for reason, value in counts.items()
-                    if self.mopso.guided_candidate_rejection_count_reasons.get(str(reason), False)
-                )
+            if isinstance(counts, dict) and any(
+                int(value) > 0
+                for reason, value in counts.items()
+                if self.mopso.guided_candidate_rejection_count_reasons.get(str(reason), False)
+            ):
+                total += 1
         return total
 
     def _write_particle_update_errors(self, rows: list[dict[str, Any]]) -> None:
