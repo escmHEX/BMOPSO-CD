@@ -21,7 +21,12 @@ from binary_mopso_cd.generated_text_validation import validate_generated_text
 from binary_mopso_cd.llm_prompts import build_anchored_text_generation_user_prompt
 from binary_mopso_cd.metrics import archive_metrics
 from binary_mopso_cd.monitor import ObservationalMonitor
-from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
+from binary_mopso_cd.objectives import (
+    evaluate_solutions,
+    recompute_pbest_f2_against_population,
+    recompute_peer_set_f2,
+    semantic_fidelity_scores,
+)
 from binary_mopso_cd.router import (
     TASK_INFLUENCE,
     TASK_PROMPT_RENDERING,
@@ -124,6 +129,20 @@ def deduplicate_solutions_by_signature(solutions: list[Solution]) -> list[Soluti
     return list(first_by_signature.values())
 
 
+def archive_candidate_union(archive_solutions: list[Solution], population: list[Solution]) -> list[Solution]:
+    by_signature: dict[SolutionSignature, Solution] = {}
+    for solution in archive_solutions:
+        by_signature[solution.vector.signature()] = solution.clone()
+    population_by_signature: dict[SolutionSignature, Solution] = {}
+    for solution in population:
+        signature = solution.vector.signature()
+        if signature not in population_by_signature:
+            population_by_signature[signature] = solution.clone()
+    for signature, solution in population_by_signature.items():
+        by_signature[signature] = solution
+    return list(by_signature.values())
+
+
 def copy_evaluation(source: Solution, target: Solution) -> None:
     target.objectives = None if source.objectives is None else Objectives(source.objectives.f1, source.objectives.f2)
     target.embedding = None if source.embedding is None else list(source.embedding)
@@ -153,7 +172,19 @@ class ExternalArchive:
     def update(self, candidates: list[Solution]) -> list[Solution]:
         previous_signatures = self._signature_state()
         merged = deduplicate_solutions_by_signature(self.solutions + [candidate.clone() for candidate in candidates])
-        self.solutions = non_dominated(merged)
+        return self._replace_with_non_dominated(merged, previous_signatures)
+
+    def replace_with_evaluated_union(self, candidates: list[Solution]) -> list[Solution]:
+        previous_signatures = self._signature_state()
+        merged = deduplicate_solutions_by_signature([candidate.clone() for candidate in candidates])
+        return self._replace_with_non_dominated(merged, previous_signatures)
+
+    def _replace_with_non_dominated(
+        self,
+        candidates: list[Solution],
+        previous_signatures: tuple[SolutionSignature, ...],
+    ) -> list[Solution]:
+        self.solutions = non_dominated(candidates)
         pruned = len(self.solutions) > self.max_size
         if pruned:
             self.prune_count += 1
@@ -327,21 +358,20 @@ class BinaryMOPSOCDEngine:
                 population_update = self._update_population(population, pbest, generation)
                 next_population = population_update.population
                 modified_count = sum(1 for solution in next_population if solution.changed)
-                comparison_batch = next_population + pbest + self.archive.solutions
-                evaluate_unique_solutions_by_signature(
-                    comparison_batch,
-                    self.reference_text,
+                recompute_peer_set_f2(next_population, self.executor.embedding_service)
+                pbest_candidates = [solution.clone() for solution in pbest]
+                recompute_pbest_f2_against_population(
+                    pbest_candidates,
+                    next_population,
                     self.executor.embedding_service,
                 )
-                next_population = comparison_batch[: len(next_population)]
-                pbest_candidates = comparison_batch[len(next_population) : len(next_population) + len(pbest)]
-                archive_revalued = comparison_batch[len(next_population) + len(pbest) :]
-                self.archive.solutions = archive_revalued
                 pbest = [
                     self.pbest_updater.choose(current, previous)
                     for current, previous in zip(next_population, pbest_candidates, strict=True)
                 ]
-                self.archive.update(next_population)
+                archive_union = archive_candidate_union(self.archive.solutions, next_population)
+                recompute_peer_set_f2(archive_union, self.executor.embedding_service)
+                self.archive.replace_with_evaluated_union(archive_union)
                 self.component_memory.add_solutions(next_population)
                 population = next_population
                 row = self._generation_metrics(
@@ -590,6 +620,8 @@ class BinaryMOPSOCDEngine:
                 return restored
             updated.prompt = proposed_prompt
             updated.generated_text = proposed_text
+            updated.objectives = Objectives(float(f1), 0.0)
+            updated.embedding = None
             updated.generation = generation
             updated.metadata["used_central_anchors"] = used_central_anchors
             updated.metadata["anchor_inclusion_probability"] = anchor_probability
@@ -710,6 +742,8 @@ class BinaryMOPSOCDEngine:
                 return restored
             updated.prompt = proposed_prompt
             updated.generated_text = proposed_text
+            updated.objectives = Objectives(float(f1), 0.0)
+            updated.embedding = None
             updated.generation = generation
             updated.metadata["used_central_anchors"] = used_central_anchors
             updated.metadata["anchor_inclusion_probability"] = anchor_probability

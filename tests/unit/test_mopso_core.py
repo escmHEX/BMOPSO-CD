@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import math
 from random import Random
@@ -901,6 +902,123 @@ def test_mopso_restores_archive_stats_from_checkpoint_state(test_config, tmp_pat
 
     assert archive.update_count == 4
     assert archive.prune_count == 2
+
+
+def test_mopso_recomputes_pbest_f2_against_population_without_matching_index(test_config, tmp_path):
+    test_config.set("checkpoint.enabled", True)
+    test_config.set("checkpoint.interval", 1)
+    test_config.set("monitor.enabled", False)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "reference": [1.0, 1.0],
+            "current zero": [1.0, 0.0],
+            "current one": [0.0, 1.0],
+            "pbest zero": [0.0, 1.0],
+            "pbest one": [-1.0, 0.0],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    initial_population = [
+        Solution(SemanticVector({"topic": "initial zero"}), "initial p0", "current zero", Objectives(0.0, 0.0)),
+        Solution(SemanticVector({"topic": "initial one"}), "initial p1", "current one", Objectives(0.0, 0.0)),
+    ]
+    next_population = [
+        Solution(SemanticVector({"topic": "current zero"}), "current p0", "current zero", Objectives(0.0, 0.0)),
+        Solution(SemanticVector({"topic": "current one"}), "current p1", "current one", Objectives(0.0, 0.0)),
+    ]
+    pbest_state = [
+        Solution(SemanticVector({"topic": "pbest zero"}), "pbest p0", "pbest zero", Objectives(0.0, 2.0)),
+        Solution(SemanticVector({"topic": "pbest one"}), "pbest p1", "pbest one", Objectives(0.0, 2.0)),
+    ]
+    engine._update_population = lambda _population, _pbest, _generation: PopulationUpdateResult(
+        [solution.clone(keep_id=True) for solution in next_population]
+    )
+
+    engine.run(
+        initial_population,
+        pbest_state=pbest_state,
+        archive_state=[],
+        archive_stats={"update_count": 0, "prune_count": 0},
+        component_memory={},
+    )
+
+    checkpoint = json.loads((tmp_path / "checkpoints" / "generation_0001.json").read_text(encoding="utf-8"))
+    assert checkpoint["pbest"][0]["generated_text"] == "current zero"
+    assert checkpoint["pbest"][0]["objectives"]["f2"] == pytest.approx(1.0)
+
+
+def test_mopso_archive_union_recomputes_f2_before_history_and_hypervolume(test_config, tmp_path):
+    test_config.set("monitor.enabled", False)
+    executor = StubExecutor()
+    executor.embedding_service = StubEmbeddingService(
+        {
+            "reference": [1.0, 1.0],
+            "archive stale": [-1.0, 0.0],
+            "population replacement": [1.0, 0.0],
+            "population other": [0.0, 1.0],
+            " same ": [1.0, 0.0],
+            "other": [0.0, 1.0],
+        }
+    )
+    engine = BinaryMOPSOCDEngine(
+        test_config,
+        PassthroughRouter(),
+        executor,
+        Random(1),
+        tmp_path,
+        "reference",
+    )
+    archived = Solution(
+        SemanticVector({"topic": "same"}),
+        "archive prompt",
+        "archive stale",
+        Objectives(0.1, 2.0),
+    )
+    replacement = Solution(
+        SemanticVector({"topic": " same "}),
+        "replacement prompt",
+        "population replacement",
+        Objectives(0.8, 9.0),
+    )
+    other = Solution(
+        SemanticVector({"topic": "other"}),
+        "other prompt",
+        "population other",
+        Objectives(0.8, 9.0),
+    )
+    initial_population = [replacement.clone(), other.clone()]
+    engine._update_population = lambda _population, _pbest, _generation: PopulationUpdateResult(
+        [replacement.clone(), other.clone()]
+    )
+
+    _population, archive = engine.run(
+        initial_population,
+        archive_state=[archived],
+        archive_stats={"update_count": 0, "prune_count": 0},
+        component_memory={},
+    )
+
+    assert [solution.generated_text for solution in archive.solutions] == [
+        "population replacement",
+        "population other",
+    ]
+    assert [solution.objectives.f2 for solution in archive.solutions] == [1.0, 1.0]
+    assert archive.update_count == 1
+    history = json.loads((tmp_path / "archive_history.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert [solution["generated_text"] for solution in history["archive"]] == [
+        "population replacement",
+        "population other",
+    ]
+    rows = list(csv.DictReader((tmp_path / "evolucion_metricas.csv").open(encoding="utf-8")))
+    assert float(rows[0]["hypervolume"]) == pytest.approx(0.45)
 
 
 def test_mopso_anchor_inclusion_probability_matches_strategy_schedule(test_config, tmp_path):
