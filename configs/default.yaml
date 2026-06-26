@@ -257,7 +257,7 @@ mopso:
   tau_tur_min: 0.6
   tau_tur_max: 0.85
   guided_trajectory_validation_enabled: true
-  guided_trajectory_relative_margin: 0.8
+  guided_trajectory_relative_margin: 0.85
   guided_candidate_diagnostics_enabled: true
   guided_candidate_rejection_count_reasons:
     empty_candidate: false
