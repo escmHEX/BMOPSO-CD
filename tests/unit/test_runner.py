@@ -20,7 +20,7 @@ class RecordingExecutor:
 class RecordingInitialBuilder:
     select_calls = 0
 
-    def __init__(self, *_args):
+    def __init__(self, *_args, **_kwargs):
         return None
 
     def build_with_context(self, _reference_text: str) -> InitialPopulationResult:

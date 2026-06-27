@@ -1,21 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
+import time
 from dataclasses import dataclass
 from random import Random
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 import numpy as np
 
-from binary_mopso_cd.async_utils import run_async, run_limited
+from binary_mopso_cd.async_utils import run_async
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.entities import Objectives, SemanticVector, Solution
 from binary_mopso_cd.executor import SemanticTaskExecutor
 from binary_mopso_cd.generated_text_validation import validate_generated_text
 from binary_mopso_cd.llm_prompts import component_additional_instruction, component_type_label
 from binary_mopso_cd.objectives import evaluate_solutions, semantic_fidelity_scores
+from binary_mopso_cd.progress import format_elapsed
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
     TASK_CENTRAL_ANCHOR_SELECTION,
@@ -31,6 +34,11 @@ from binary_mopso_cd.utils import canonical_text, word_count
 
 
 DEFAULT_NUM_CENTRAL_ANCHORS = 4
+INITIAL_TEXT_GENERATION_HEARTBEAT_SECONDS = 30.0
+
+
+class ProgressReporter(Protocol):
+    def info(self, message: str, *args: Any) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -62,11 +70,19 @@ class PoolValidationResult:
 
 
 class InitialPopulationBuilder:
-    def __init__(self, config: RuntimeConfig, router: SemanticRouter, executor: SemanticTaskExecutor, rng: Random):
+    def __init__(
+        self,
+        config: RuntimeConfig,
+        router: SemanticRouter,
+        executor: SemanticTaskExecutor,
+        rng: Random,
+        progress: ProgressReporter | None = None,
+    ):
         self.config = config
         self.router = router
         self.executor = executor
         self.rng = rng
+        self.progress = progress
         self.components = ComponentSettings.from_config(config)
         self.settings = InitializationSettings.from_config(config)
         self.parallelism = ParallelismSettings.from_config(config)
@@ -78,10 +94,22 @@ class InitialPopulationBuilder:
     def build_with_context(self, reference_text: str) -> InitialPopulationResult:
         n = self.config.n
         domain = str(self.config.get("experiment.domain"))
+        started = time.perf_counter()
+        self._log_initialization("initial population | extracting semantic anchors")
         reference_context = self.build_reference_context(reference_text)
         anchors = reference_context.semantic_anchors
         central_anchor_count = count_anchors(anchors)
+        self._log_initialization(
+            "initial population | semantic anchors ready | components=%s | anchors=%s | elapsed=%s",
+            len(anchors),
+            central_anchor_count,
+            format_elapsed(time.perf_counter() - started),
+        )
         pool_sizes = choose_pool_sizes(n, self.config)
+        self._log_initialization(
+            "initial population | building semantic pools | requested=%s",
+            dict(pool_sizes),
+        )
         pools: dict[str, list[str]] = {}
         for component, quantity in pool_sizes.items():
             pools[component] = self._build_pool(
@@ -94,9 +122,21 @@ class InitialPopulationBuilder:
             )
         product = math.prod(len(values) for values in pools.values())
         min_product = self.settings.min_product_multiplier * n
+        self._log_initialization(
+            "initial population | semantic pools ready | sizes=%s | product=%s | required=%s",
+            self._pool_size_summary(pools),
+            product,
+            min_product,
+        )
         if product < min_product:
             self._expand_one_pool(pools, min_product, reference_text, anchors, central_anchor_count, domain)
         product = math.prod(len(values) for values in pools.values())
+        self._log_initialization(
+            "initial population | semantic pools checked | sizes=%s | product=%s | required=%s",
+            self._pool_size_summary(pools),
+            product,
+            min_product,
+        )
         if product < min_product:
             pool_sizes = self._pool_size_summary(pools)
             raise RuntimeError(
@@ -104,7 +144,16 @@ class InitialPopulationBuilder:
                 f"pool_sizes={pool_sizes}. See initialization_pool_diagnostics.jsonl."
             )
         candidates = self._candidate_vectors(pools)
+        self._log_initialization(
+            "initial population | reducing prompt candidates | candidates=%s | target=%s",
+            len(candidates),
+            2 * n,
+        )
         reduced = self._reduce_by_prompt_diversity(candidates, domain, 2 * n)
+        self._log_initialization(
+            "initial population | prompt candidates reduced | selected=%s",
+            len(reduced),
+        )
         generated = self._generate_texts(reduced, reference_text)
         generated.sort(
             key=lambda solution: (
@@ -120,6 +169,11 @@ class InitialPopulationBuilder:
             solution.velocity = {component: 0.0 for component in self.components.order}
             solution.last_guided_move = {}
             solution.changed = False
+        self._log_initialization(
+            "initial population | population ready | selected=%s | elapsed=%s",
+            len(selected),
+            format_elapsed(time.perf_counter() - started),
+        )
         return InitialPopulationResult(selected, anchors)
 
     def build_reference_context(self, reference_text: str) -> ReferenceContext:
@@ -202,6 +256,16 @@ class InitialPopulationBuilder:
                 "pool_size_after": len(existing or []) + len(validation.valid_items),
             }
         )
+        self._log_initialization(
+            "initial population | semantic pool ready | component=%s | task=%s | requested=%s "
+            "| valid=%s | rejected=%s | pool_size_after=%s",
+            component,
+            task_name,
+            quantity,
+            len(validation.valid_items),
+            len(validation.rejected_items),
+            len(existing or []) + len(validation.valid_items),
+        )
         return validation.valid_items
 
     def _expand_one_pool(
@@ -220,6 +284,14 @@ class InitialPopulationBuilder:
             other_product = math.prod(other_sizes) if other_sizes else 1
             needed_total = math.ceil(required_product / max(other_product, 1))
             extra = max(1, needed_total - len(pools[component]))
+            self._log_initialization(
+                "initial population | expanding semantic pool | component=%s | existing=%s | extra=%s "
+                "| required_product=%s",
+                component,
+                len(pools[component]),
+                extra,
+                required_product,
+            )
             additions = self._build_pool(
                 component,
                 extra,
@@ -367,12 +439,24 @@ class InitialPopulationBuilder:
             )
         if len(accepted) < self.config.n:
             self._write_rejections(rejections)
+            self._log_initialization(
+                "initial population | generated texts validated | accepted=%s | rejected=%s | required=%s",
+                len(accepted),
+                len(rejections),
+                self.config.n,
+            )
             raise RuntimeError(
                 f"Generated only {len(accepted)} valid initial texts after {len(items)} specified generation calls; "
                 f"required {self.config.n}. See initialization_rejections.jsonl."
             )
         if rejections:
             self._write_rejections(rejections)
+        self._log_initialization(
+            "initial population | generated texts validated | accepted=%s | rejected=%s | required=%s",
+            len(accepted),
+            len(rejections),
+            self.config.n,
+        )
         return accepted
 
     def _generate_text_candidates(
@@ -381,15 +465,84 @@ class InitialPopulationBuilder:
         reference_text: str,
     ) -> list[InitialTextGenerationResult]:
         indexed = list(enumerate(items))
+        total = len(indexed)
         if self.parallelism.enabled and self.parallelism.initial_text_generation_max_concurrent > 1:
+            max_concurrent = self.parallelism.initial_text_generation_max_concurrent
+            self._log_initialization(
+                "initial population | generating texts | candidates=%s | max_concurrent=%s",
+                total,
+                max_concurrent,
+            )
             return run_async(
-                run_limited(
+                self._generate_text_candidates_async(
                     indexed,
-                    self.parallelism.initial_text_generation_max_concurrent,
-                    lambda item: self._generate_text_candidate_async(item, reference_text),
+                    reference_text,
+                    max_concurrent,
                 )
             )
-        return [self._generate_text_candidate(item, reference_text) for item in indexed]
+        self._log_initialization(
+            "initial population | generating texts | candidates=%s | max_concurrent=1",
+            total,
+        )
+        started = time.perf_counter()
+        results: list[InitialTextGenerationResult] = []
+        failed = 0
+        for item in indexed:
+            result = self._generate_text_candidate(item, reference_text)
+            results.append(result)
+            if result.error is not None:
+                failed += 1
+            self._log_text_generation_progress(len(results), total, 1, failed, started)
+        return results
+
+    async def _generate_text_candidates_async(
+        self,
+        indexed: list[tuple[int, tuple[SemanticVector, str, float]]],
+        reference_text: str,
+        max_concurrent: int,
+    ) -> list[InitialTextGenerationResult]:
+        if max_concurrent <= 0:
+            raise ValueError("max_concurrent must be positive")
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results: list[InitialTextGenerationResult | None] = [None] * len(indexed)
+        started = time.perf_counter()
+        completed = 0
+        failed = 0
+
+        async def run_one(position: int, item: tuple[int, tuple[SemanticVector, str, float]]):
+            async with semaphore:
+                result = await self._generate_text_candidate_async(item, reference_text)
+            return position, result
+
+        pending = {asyncio.create_task(run_one(position, item)) for position, item in enumerate(indexed)}
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=INITIAL_TEXT_GENERATION_HEARTBEAT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                self._log_initialization(
+                    "initial population | text generation waiting | completed=%s/%s | failed=%s "
+                    "| max_concurrent=%s | elapsed=%s",
+                    completed,
+                    len(indexed),
+                    failed,
+                    max_concurrent,
+                    format_elapsed(time.perf_counter() - started),
+                )
+                continue
+            for task in done:
+                position, result = task.result()
+                results[position] = result
+                completed += 1
+                if result.error is not None:
+                    failed += 1
+                self._log_text_generation_progress(completed, len(indexed), max_concurrent, failed, started)
+
+        if any(result is None for result in results):
+            raise RuntimeError("initial text generation did not produce all results")
+        return [result for result in results if result is not None]
 
     def _generate_text_candidate(
         self,
@@ -456,6 +609,32 @@ class InitialPopulationBuilder:
         path = self.executor.outdir / "initialization_pool_diagnostics.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _log_text_generation_progress(
+        self,
+        completed: int,
+        total: int,
+        max_concurrent: int,
+        failed: int,
+        started: float,
+    ) -> None:
+        if total <= 0:
+            return
+        percent = int((completed / total) * 100)
+        self._log_initialization(
+            "initial population | text generation progress | completed=%s/%s (%s%%) | failed=%s "
+            "| max_concurrent=%s | elapsed=%s",
+            completed,
+            total,
+            percent,
+            failed,
+            max_concurrent,
+            format_elapsed(time.perf_counter() - started),
+        )
+
+    def _log_initialization(self, message: str, *args: Any) -> None:
+        if self.progress is not None:
+            self.progress.info(message, *args)
 
 
 def choose_pool_sizes(n: int, config: RuntimeConfig) -> dict[str, int]:

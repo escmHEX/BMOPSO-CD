@@ -69,7 +69,7 @@ class ExperimentRunner:
                     if str(item).strip()
                 ] if should_select_central_anchors else []
                 if not central_anchors and should_select_central_anchors:
-                    context_builder = InitialPopulationBuilder(config, router, executor, rng)
+                    context_builder = InitialPopulationBuilder(config, router, executor, rng, progress=progress)
                     if not semantic_anchors:
                         reference_context = context_builder.build_reference_context(self.reference_text)
                         semantic_anchors = reference_context.semantic_anchors
@@ -85,7 +85,7 @@ class ExperimentRunner:
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
                 progress.stage(3, 6, "Construyendo poblacion inicial")
-                initial_builder = InitialPopulationBuilder(config, router, executor, rng)
+                initial_builder = InitialPopulationBuilder(config, router, executor, rng, progress=progress)
                 initial_result = initial_builder.build_with_context(self.reference_text)
                 initial_population = initial_result.population
                 semantic_anchors = initial_result.semantic_anchors

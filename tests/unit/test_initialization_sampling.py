@@ -117,6 +117,14 @@ class AsyncTextRecordingExecutor:
         raise AssertionError("sync execute should not be used")
 
 
+class RecordingProgress:
+    def __init__(self):
+        self.messages = []
+
+    def info(self, message, *args):
+        self.messages.append(message % args if args else message)
+
+
 def test_build_pool_passes_strategy_component_context(test_config):
     executor = RecordingExecutor()
     builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1))
@@ -307,6 +315,45 @@ def test_generate_texts_parallel_preserves_order_and_concurrency_limit(test_conf
         "third generated text.",
     ]
     assert executor.max_active == 2
+
+
+def test_generate_texts_parallel_logs_live_progress(test_config):
+    test_config.set("experiment.n", 3)
+    test_config.set("parallelism.initial_text_generation_max_concurrent", 2)
+    executor = AsyncTextRecordingExecutor(
+        {
+            "prompt one": "first generated text.",
+            "prompt two": "second generated text.",
+            "prompt three": "third generated text.",
+        }
+    )
+    progress = RecordingProgress()
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1), progress=progress)
+    items = [
+        (SemanticVector({"role": "role one", "topic": "topic one", "action": "action one"}), "prompt one", 0.3),
+        (SemanticVector({"role": "role two", "topic": "topic two", "action": "action two"}), "prompt two", 0.2),
+        (SemanticVector({"role": "role three", "topic": "topic three", "action": "action three"}), "prompt three", 0.1),
+    ]
+
+    generated = builder._generate_texts(items, "reference text")
+
+    assert len(generated) == 3
+    assert any(
+        "initial population | generating texts | candidates=3 | max_concurrent=2" in message
+        for message in progress.messages
+    )
+    assert any(
+        "initial population | text generation progress | completed=1/3" in message
+        for message in progress.messages
+    )
+    assert any(
+        "initial population | text generation progress | completed=3/3 (100%)" in message
+        for message in progress.messages
+    )
+    assert any(
+        "initial population | generated texts validated | accepted=3 | rejected=0" in message
+        for message in progress.messages
+    )
 
 
 def test_generate_texts_parallel_records_generation_failures(test_config, tmp_path):
