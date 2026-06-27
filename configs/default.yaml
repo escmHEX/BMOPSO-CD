@@ -15,8 +15,8 @@ runtime:
 
 parallelism:
   enabled: true
-  particle_update_max_concurrent: 10
-  initial_text_generation_max_concurrent: 10
+  particle_update_max_concurrent: 20
+  initial_text_generation_max_concurrent: 20
 
 checkpoint:
   enabled: false
