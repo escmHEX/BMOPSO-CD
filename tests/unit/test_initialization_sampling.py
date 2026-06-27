@@ -5,7 +5,7 @@ from random import Random
 
 import numpy as np
 
-from binary_mopso_cd.initialization import InitialPopulationBuilder
+from binary_mopso_cd.initialization import InitialPopulationBuilder, greedy_max_min_indices
 from binary_mopso_cd.entities import SemanticVector
 from binary_mopso_cd.router import (
     TASK_ANCHORS,
@@ -76,6 +76,32 @@ class ConstantEmbeddingService:
         return np.asarray([[1.0, 0.0] for _text in texts], dtype=float)
 
 
+class DistinctEmbeddingService:
+    def encode(self, texts: list[str], text_type: str) -> np.ndarray:
+        vectors = np.asarray(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.5, 0.5, 0.0],
+            ],
+            dtype=float,
+        )
+        return vectors[: len(texts)]
+
+
+class PromptRenderingExecutor:
+    def __init__(self):
+        self.tasks = []
+        self.embedding_service = DistinctEmbeddingService()
+        self.outdir = None
+
+    def execute(self, task):
+        self.tasks.append(task)
+        components = task.task_params["components"]
+        return " ".join(str(value) for value in components.values())
+
+
 class TextRecordingExecutor:
     def __init__(self, texts: list[str]):
         self.tasks = []
@@ -123,6 +149,82 @@ class RecordingProgress:
 
     def info(self, message, *args):
         self.messages.append(message % args if args else message)
+
+
+def test_prompt_reduction_logs_internal_diagnostic_steps(test_config):
+    progress = RecordingProgress()
+    builder = InitialPopulationBuilder(
+        test_config,
+        PassthroughRouter(),
+        PromptRenderingExecutor(),
+        Random(1),
+        progress=progress,
+    )
+    candidates = [
+        SemanticVector({"role": "resident", "topic": "quarantine", "action": "avoid phone"}),
+        SemanticVector({"role": "worker", "topic": "anxiety", "action": "mute alerts"}),
+        SemanticVector({"role": "neighbor", "topic": "routine loss", "action": "ask for help"}),
+    ]
+
+    reduced = builder._reduce_by_prompt_diversity(candidates, "crisis messages", 2)
+
+    assert len(reduced) == 2
+    assert any("rendering prompt candidates" in message for message in progress.messages)
+    assert any("candidate prompts rendered" in message for message in progress.messages)
+    assert any("embedding prompt candidates" in message for message in progress.messages)
+    assert any("prompt embeddings ready" in message for message in progress.messages)
+    assert any("selecting diverse prompt candidates" in message for message in progress.messages)
+    assert any("diverse prompt candidates selected" in message for message in progress.messages)
+    assert any("scoring prompt diversity" in message for message in progress.messages)
+    assert any("prompt diversity scored" in message for message in progress.messages)
+
+
+def test_greedy_prompt_reduction_does_not_require_numpy_matmul():
+    assert greedy_max_min_indices(NoMatmulEmbeddings(), 2) == [0, 1]
+
+
+class NoMatmulRow:
+    def __init__(self, values: list[float]):
+        self.values = values
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __matmul__(self, _other):
+        raise AssertionError("prompt reduction should avoid ndarray matmul for small dot products")
+
+
+class NoMatmulEmbeddings:
+    shape = (3, 3)
+    dtype = "diagnostic"
+
+    def __getitem__(self, index):
+        return [
+            NoMatmulRow([1.0, 0.0, 0.0]),
+            NoMatmulRow([0.0, 1.0, 0.0]),
+            NoMatmulRow([0.0, 0.0, 1.0]),
+        ][index]
+
+
+class NoMatmulEmbeddingService:
+    def encode(self, texts: list[str], text_type: str) -> NoMatmulEmbeddings:
+        return NoMatmulEmbeddings()
+
+
+def test_prompt_reduction_scoring_does_not_require_numpy_matmul(test_config):
+    progress = RecordingProgress()
+    executor = PromptRenderingExecutor()
+    executor.embedding_service = NoMatmulEmbeddingService()
+    builder = InitialPopulationBuilder(test_config, PassthroughRouter(), executor, Random(1), progress=progress)
+    candidates = [
+        SemanticVector({"role": "resident", "topic": "quarantine", "action": "avoid phone"}),
+        SemanticVector({"role": "worker", "topic": "anxiety", "action": "mute alerts"}),
+        SemanticVector({"role": "neighbor", "topic": "routine loss", "action": "ask for help"}),
+    ]
+
+    reduced = builder._reduce_by_prompt_diversity(candidates, "crisis messages", 2)
+
+    assert len(reduced) == 2
 
 
 def test_build_pool_passes_strategy_component_context(test_config):
