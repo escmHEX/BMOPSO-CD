@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import sys
-
 import pytest
 
-from binary_mopso_cd import cli
 from binary_mopso_cd.cli import apply_args, build_parser
 
 
@@ -13,16 +10,6 @@ def test_cli_set_updates_scalar_value(test_config):
     args = parser.parse_args(["--reference-text", "reference", "--set", "experiment.n=5"])
     config = apply_args(test_config, args)
     assert config.n == 5
-
-
-def test_cli_enables_fatal_signal_tracebacks(monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli.faulthandler, "is_enabled", lambda: False)
-    monkeypatch.setattr(cli.faulthandler, "enable", lambda **kwargs: calls.append(kwargs))
-
-    cli.enable_fatal_signal_tracebacks()
-
-    assert calls == [{"file": sys.stderr, "all_threads": True}]
 
 
 def test_cli_set_parses_boolean_value(test_config):

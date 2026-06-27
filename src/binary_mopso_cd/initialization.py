@@ -348,50 +348,16 @@ class InitialPopulationBuilder:
         domain: str,
         target_count: int,
     ) -> list[tuple[SemanticVector, str, float]]:
-        self._log_initialization(
-            "initial population | rendering prompt candidates | candidates=%s",
-            len(candidates),
-        )
         prompts = [self._render_prompt(vector, domain) for vector in candidates]
-        self._log_initialization(
-            "initial population | candidate prompts rendered | prompts=%s",
-            len(prompts),
-        )
-        self._log_initialization(
-            "initial population | embedding prompt candidates | prompts=%s",
-            len(prompts),
-        )
         embeddings = self.executor.embedding_service.encode(prompts, text_type="prompt")
-        self._log_initialization(
-            "initial population | prompt embeddings ready | shape=%s | dtype=%s",
-            tuple(embeddings.shape),
-            embeddings.dtype,
-        )
-        self._log_initialization(
-            "initial population | selecting diverse prompt candidates | candidates=%s | target=%s",
-            embeddings.shape[0],
-            min(target_count, len(candidates)),
-        )
         selected_indices = greedy_max_min_indices(embeddings, min(target_count, len(candidates)))
-        self._log_initialization(
-            "initial population | diverse prompt candidates selected | selected=%s",
-            len(selected_indices),
-        )
-        self._log_initialization(
-            "initial population | scoring prompt diversity | selected=%s",
-            len(selected_indices),
-        )
         reduced: list[tuple[SemanticVector, str, float]] = []
         for idx in selected_indices:
             score = 0.0
             if len(selected_indices) > 1:
                 others = [j for j in selected_indices if j != idx]
-                score = min(unit_embedding_distance(embeddings[idx], embeddings[other]) for other in others)
+                score = float(np.min(1.0 - (embeddings[idx] @ embeddings[others].T)))
             reduced.append((candidates[idx], prompts[idx], score))
-        self._log_initialization(
-            "initial population | prompt diversity scored | selected=%s",
-            len(reduced),
-        )
         return reduced
 
     def _render_prompt(self, vector: SemanticVector, domain: str) -> str:
@@ -737,14 +703,6 @@ def materialize_product(values: list[list[str]]) -> list[tuple[str, ...]]:
     return result
 
 
-def unit_embedding_dot(left: Any, right: Any) -> float:
-    return sum(float(left_value) * float(right_value) for left_value, right_value in zip(left, right, strict=True))
-
-
-def unit_embedding_distance(left: Any, right: Any) -> float:
-    return 1.0 - unit_embedding_dot(left, right)
-
-
 def greedy_max_min_indices(embeddings: np.ndarray, count: int) -> list[int]:
     if count <= 0 or embeddings.shape[0] == 0:
         return []
@@ -753,7 +711,7 @@ def greedy_max_min_indices(embeddings: np.ndarray, count: int) -> list[int]:
     while remaining and len(selected) < count:
         best_idx = max(
             remaining,
-            key=lambda idx: min(unit_embedding_distance(embeddings[idx], embeddings[sel]) for sel in selected),
+            key=lambda idx: min(1.0 - float(embeddings[idx] @ embeddings[sel]) for sel in selected),
         )
         selected.append(best_idx)
         remaining.remove(best_idx)

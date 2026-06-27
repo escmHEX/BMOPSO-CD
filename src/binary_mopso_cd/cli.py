@@ -1,19 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import faulthandler
-import sys
 from pathlib import Path
 
 import yaml
 
 from binary_mopso_cd.config import RuntimeConfig
 from binary_mopso_cd.runner import ExperimentRunner
-
-
-def enable_fatal_signal_tracebacks() -> None:
-    if not faulthandler.is_enabled():
-        faulthandler.enable(file=sys.stderr, all_threads=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +43,6 @@ def apply_args(config: RuntimeConfig, args: argparse.Namespace) -> RuntimeConfig
 
 
 def main(argv: list[str] | None = None) -> int:
-    enable_fatal_signal_tracebacks()
     parser = build_parser()
     args = parser.parse_args(argv)
     config = RuntimeConfig.load(args.config)
