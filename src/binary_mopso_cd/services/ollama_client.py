@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import time
@@ -111,6 +112,8 @@ class OllamaChatClient:
         host: str,
         timeout_seconds: int = 120,
         think: bool | str | None = False,
+        retry_attempts: int = 0,
+        retry_backoff_seconds: float = 0.0,
         model_profiles: dict[str, dict[str, Any]] | None = None,
         logger: LLMCallLogger | None = None,
     ):
@@ -119,6 +122,8 @@ class OllamaChatClient:
         self.host = host
         self.timeout_seconds = timeout_seconds
         self.think = think
+        self.retry_attempts = max(0, int(retry_attempts))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
         self.model_profiles = model_profiles or {}
         self.client = Client(host=host, timeout=timeout_seconds)
         self.logger = logger or LLMCallLogger(None)
@@ -159,10 +164,13 @@ class OllamaChatClient:
         content: str,
         raw_content: str,
         response: Any,
+        attempt: int = 1,
+        max_attempts: int = 1,
     ) -> None:
         thinking = response_message_thinking(response)
         self.logger.log(
             {
+                "status": "ok",
                 "task_id": task_id,
                 "semantic_task": semantic_task,
                 "model": model,
@@ -175,6 +183,9 @@ class OllamaChatClient:
                 "system_prompt_chars": len(messages[0]["content"]) if messages else 0,
                 "user_prompt_chars": len(messages[1]["content"]) if len(messages) > 1 else 0,
                 "elapsed_seconds": elapsed,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "timeout_seconds": getattr(self, "timeout_seconds", None),
                 "content_chars": len(str(content)),
                 "raw_content_chars": len(str(raw_content)),
                 "empty_content": not bool(str(content).strip()),
@@ -188,6 +199,76 @@ class OllamaChatClient:
         if think is _UNSET:
             return self.think
         return think
+
+    def _max_attempts(self) -> int:
+        return max(1, int(getattr(self, "retry_attempts", 0)) + 1)
+
+    def _retry_delay_seconds(self, attempt: int) -> float:
+        return max(0.0, float(getattr(self, "retry_backoff_seconds", 0.0))) * attempt
+
+    def _sleep_before_retry(self, attempt: int) -> None:
+        delay = self._retry_delay_seconds(attempt)
+        if delay > 0:
+            time.sleep(delay)
+
+    async def _sleep_before_retry_async(self, attempt: int) -> None:
+        delay = self._retry_delay_seconds(attempt)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    def _is_retryable_error(self, error: Exception) -> bool:
+        retryable_types: list[type[BaseException]] = [TimeoutError]
+        try:
+            import httpx
+
+            retryable_types.append(httpx.TimeoutException)
+        except ImportError:
+            pass
+        try:
+            import httpcore
+
+            retryable_types.append(httpcore.TimeoutException)
+        except ImportError:
+            pass
+        return isinstance(error, tuple(retryable_types))
+
+    def _log_failed_call(
+        self,
+        *,
+        task_id: str,
+        semantic_task: str,
+        model: str,
+        options: dict[str, Any],
+        think: bool | str | None,
+        response_format: Any,
+        messages: list[dict[str, str]],
+        elapsed: float,
+        attempt: int,
+        max_attempts: int,
+        error: Exception,
+    ) -> None:
+        self.logger.log(
+            {
+                "status": "error",
+                "task_id": task_id,
+                "semantic_task": semantic_task,
+                "model": model,
+                "options": options,
+                "stream": False,
+                "think": think,
+                "format": "plain" if response_format is None else "structured",
+                "message_count": len(messages),
+                "message_roles": [message["role"] for message in messages],
+                "system_prompt_chars": len(messages[0]["content"]) if messages else 0,
+                "user_prompt_chars": len(messages[1]["content"]) if len(messages) > 1 else 0,
+                "elapsed_seconds": elapsed,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "timeout_seconds": getattr(self, "timeout_seconds", None),
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            }
+        )
 
     def chat(
         self,
@@ -206,15 +287,38 @@ class OllamaChatClient:
             {"role": "user", "content": user_prompt},
         ]
         resolved_think = self._resolve_think(think)
-        started = time.perf_counter()
-        response = self.client.chat(
-            model=model,
-            messages=messages,
-            options=options,
-            stream=False,
-            think=resolved_think,
-            format=response_format,
-        )
+        max_attempts = self._max_attempts()
+        for attempt in range(1, max_attempts + 1):
+            started = time.perf_counter()
+            try:
+                response = self.client.chat(
+                    model=model,
+                    messages=messages,
+                    options=options,
+                    stream=False,
+                    think=resolved_think,
+                    format=response_format,
+                )
+            except Exception as error:
+                elapsed = time.perf_counter() - started
+                self._log_failed_call(
+                    task_id=task_id,
+                    semantic_task=semantic_task,
+                    model=model,
+                    options=options,
+                    think=resolved_think,
+                    response_format=response_format,
+                    messages=messages,
+                    elapsed=elapsed,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error=error,
+                )
+                if attempt >= max_attempts or not self._is_retryable_error(error):
+                    raise
+                self._sleep_before_retry(attempt)
+                continue
+            break
         elapsed = time.perf_counter() - started
         raw_content = response_message_content(response)
         content = self._normalize_content(model, raw_content)
@@ -230,6 +334,8 @@ class OllamaChatClient:
             content=content,
             raw_content=raw_content,
             response=response,
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
         text = str(content).strip()
         if not text:
@@ -258,22 +364,47 @@ class OllamaChatClient:
             {"role": "user", "content": user_prompt},
         ]
         resolved_think = self._resolve_think(think)
-        async_client = AsyncClient(host=self.host, timeout=self.timeout_seconds)
-        try:
-            started = time.perf_counter()
-            response = await async_client.chat(
-                model=model,
-                messages=messages,
-                options=options,
-                stream=False,
-                think=resolved_think,
-                format=response_format,
-            )
-            elapsed = time.perf_counter() - started
-        finally:
-            close_result = async_client.close()
-            if inspect.isawaitable(close_result):
-                await close_result
+        max_attempts = self._max_attempts()
+        for attempt in range(1, max_attempts + 1):
+            async_client = AsyncClient(host=self.host, timeout=self.timeout_seconds)
+            retry = False
+            try:
+                started = time.perf_counter()
+                response = await async_client.chat(
+                    model=model,
+                    messages=messages,
+                    options=options,
+                    stream=False,
+                    think=resolved_think,
+                    format=response_format,
+                )
+                elapsed = time.perf_counter() - started
+            except Exception as error:
+                elapsed = time.perf_counter() - started
+                self._log_failed_call(
+                    task_id=task_id,
+                    semantic_task=semantic_task,
+                    model=model,
+                    options=options,
+                    think=resolved_think,
+                    response_format=response_format,
+                    messages=messages,
+                    elapsed=elapsed,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error=error,
+                )
+                retry = attempt < max_attempts and self._is_retryable_error(error)
+                if not retry:
+                    raise
+            finally:
+                close_result = async_client.close()
+                if inspect.isawaitable(close_result):
+                    await close_result
+            if retry:
+                await self._sleep_before_retry_async(attempt)
+                continue
+            break
         raw_content = response_message_content(response)
         content = self._normalize_content(model, raw_content)
         self._log_call(
@@ -288,6 +419,8 @@ class OllamaChatClient:
             content=content,
             raw_content=raw_content,
             response=response,
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
         text = str(content).strip()
         if not text:

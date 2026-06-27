@@ -384,6 +384,12 @@ class RuntimeConfig:
             raise ValueError("mopso.tau_tur_min must not exceed mopso.tau_tur_max")
         if int(self.get("mopso.k_retry", 0)) != 0:
             raise ValueError("mopso.k_retry must remain 0 for the specified strategy")
+        if int(self.get("ollama.timeout_seconds", 120)) <= 0:
+            raise ValueError("ollama.timeout_seconds must be positive")
+        if int(self.get("ollama.retry_attempts", 0)) < 0:
+            raise ValueError("ollama.retry_attempts must be non-negative")
+        if float(self.get("ollama.retry_backoff_seconds", 0)) < 0:
+            raise ValueError("ollama.retry_backoff_seconds must be non-negative")
         parallelism_enabled = self.get("parallelism.enabled", True)
         if not isinstance(parallelism_enabled, bool):
             raise ValueError("parallelism.enabled must be boolean")

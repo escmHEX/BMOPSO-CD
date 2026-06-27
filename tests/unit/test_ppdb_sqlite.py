@@ -37,6 +37,38 @@ def test_ppdb_sqlite_does_not_rebuild_existing_index(tmp_path):
     second.close()
 
 
+def test_ppdb_sqlite_logs_first_time_index_build(tmp_path, capsys):
+    source = tmp_path / "ppdb.txt"
+    write_ppdb(source, [("help", "aid")])
+    index_path = tmp_path / "ppdb.sqlite"
+
+    index = PPDBSQLiteIndex(index_path, source)
+    index.close()
+
+    captured = capsys.readouterr()
+    assert "Building PPDB SQLite index" in captured.out
+    assert str(source) in captured.out
+    assert str(index_path) in captured.out
+    assert "PPDB SQLite index ready" in captured.out
+
+
+def test_ppdb_sqlite_logs_existing_index_reuse(tmp_path, capsys):
+    source = tmp_path / "ppdb.txt"
+    write_ppdb(source, [("help", "aid")])
+    index_path = tmp_path / "ppdb.sqlite"
+    first = PPDBSQLiteIndex(index_path, source)
+    first.close()
+    capsys.readouterr()
+
+    second = PPDBSQLiteIndex(index_path, source)
+    second.close()
+
+    captured = capsys.readouterr()
+    assert "Using existing PPDB SQLite index" in captured.out
+    assert str(index_path) in captured.out
+    assert "Building PPDB SQLite index" not in captured.out
+
+
 def test_ppdb_sqlite_fails_when_index_and_source_are_missing(tmp_path):
     with pytest.raises(FileNotFoundError, match="models.ppdb.source_path"):
         PPDBSQLiteIndex(tmp_path / "missing.sqlite", tmp_path / "missing.ppdb")

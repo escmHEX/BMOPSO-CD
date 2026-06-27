@@ -138,6 +138,8 @@ class SemanticTaskExecutor:
             host=str(self.config.get("ollama.host")),
             timeout_seconds=int(self.config.get("ollama.timeout_seconds", 120)),
             think=self.config.get("ollama.think", False),
+            retry_attempts=int(self.config.get("ollama.retry_attempts", 0)),
+            retry_backoff_seconds=float(self.config.get("ollama.retry_backoff_seconds", 0)),
             model_profiles=self.config.ollama_model_profiles(),
             logger=logger,
         )

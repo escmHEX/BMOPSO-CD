@@ -25,7 +25,9 @@ checkpoint:
 
 ollama:
   host: "http://127.0.0.1:11434"
-  timeout_seconds: 120
+  timeout_seconds: 600
+  retry_attempts: 1
+  retry_backoff_seconds: 5
   default_model: "llama3.1:8b"
   alternative_model: "qwen3.5:2b"
   model_options:

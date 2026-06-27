@@ -12,6 +12,7 @@ from binary_mopso_cd.utils import canonical_text
 
 SCHEMA_VERSION = 1
 DEFAULT_BATCH_SIZE = 10_000
+PROGRESS_EVERY_LINES = 250_000
 
 
 def project_root() -> Path:
@@ -73,6 +74,8 @@ class PPDBSQLiteIndex:
                     f"Configure models.ppdb.source_path or create the index at {index_path}."
                 )
             build_sqlite_index(source_path, index_path)
+        else:
+            print(f"Using existing PPDB SQLite index: {index_path}", flush=True)
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -105,6 +108,11 @@ def build_sqlite_index(source_path: Path, index_path: Path, batch_size: int = DE
     temporary_path = index_path.with_suffix(index_path.suffix + ".tmp")
     if temporary_path.exists():
         temporary_path.unlink()
+    source_size = source_path.stat().st_size if source_path.exists() else 0
+    print(
+        f"Building PPDB SQLite index: source={source_path} index={index_path} sourceBytes={source_size}",
+        flush=True,
+    )
     connection = sqlite3.connect(temporary_path)
     try:
         configure_build_connection(connection)
@@ -130,6 +138,11 @@ def build_sqlite_index(source_path: Path, index_path: Path, batch_size: int = DE
         raise
     connection.close()
     os.replace(temporary_path, index_path)
+    index_size = index_path.stat().st_size if index_path.exists() else 0
+    print(
+        f"PPDB SQLite index ready: index={index_path} entries={entry_count} indexBytes={index_size}",
+        flush=True,
+    )
 
 
 def configure_build_connection(connection: sqlite3.Connection) -> None:
@@ -173,6 +186,8 @@ def insert_ppdb_entries(connection: sqlite3.Connection, source_path: Path, batch
             if len(batch) >= batch_size:
                 total += insert_batch(connection, batch)
                 batch.clear()
+            if source_order and source_order % PROGRESS_EVERY_LINES == 0:
+                print(f"PPDB SQLite index progress: sourceLines={source_order} entries={total}", flush=True)
         if batch:
             total += insert_batch(connection, batch)
     return total

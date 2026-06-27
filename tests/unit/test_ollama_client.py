@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import httpx
 import pytest
 
 from binary_mopso_cd.services.ollama_client import (
@@ -182,6 +183,48 @@ def test_ollama_chat_client_logs_empty_content_before_raising(tmp_path):
     assert call["output_tokens"] == 3640
 
 
+def test_ollama_chat_client_retries_timeout_and_logs_failed_attempt(tmp_path):
+    attempts = {"count": 0}
+
+    class StubClient:
+        def chat(self, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise httpx.ReadTimeout("timed out")
+            return {"message": {"content": "generated text"}}
+
+    client = object.__new__(OllamaChatClient)
+    client.host = "http://127.0.0.1:11434"
+    client.timeout_seconds = 120
+    client.retry_attempts = 1
+    client.retry_backoff_seconds = 0
+    client.think = False
+    client.model_profiles = {}
+    client.client = StubClient()
+    client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+
+    text = client.chat(
+        task_id="task-retry",
+        semantic_task="semantic_anchor_extraction",
+        model="llama3.1:8b",
+        system_prompt="system",
+        user_prompt="user",
+        options={"temperature": 0},
+        response_format={"type": "object"},
+        think=False,
+    )
+
+    assert text == "generated text"
+    assert attempts["count"] == 2
+    calls = [json.loads(line) for line in (tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert calls[0]["status"] == "error"
+    assert calls[0]["error_type"] == "ReadTimeout"
+    assert calls[0]["attempt"] == 1
+    assert calls[0]["max_attempts"] == 2
+    assert calls[1]["status"] == "ok"
+    assert calls[1]["attempt"] == 2
+
+
 def test_ollama_chat_client_async_uses_async_client_and_logs(monkeypatch, tmp_path):
     captured = {}
 
@@ -241,3 +284,56 @@ def test_ollama_chat_client_async_uses_async_client_and_logs(monkeypatch, tmp_pa
     assert call["ollamaTotalDurationSeconds"] == 2.0
     assert call["message_count"] == 2
     assert call["message_roles"] == ["system", "user"]
+
+
+def test_ollama_chat_client_async_retries_timeout_and_logs_failed_attempt(monkeypatch, tmp_path):
+    attempts = {"count": 0, "closed": 0}
+
+    class StubAsyncClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def chat(self, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise httpx.ReadTimeout("timed out")
+            return {"message": {"content": "async generated text"}}
+
+        async def close(self):
+            attempts["closed"] += 1
+
+    import ollama
+
+    monkeypatch.setattr(ollama, "AsyncClient", StubAsyncClient)
+    client = object.__new__(OllamaChatClient)
+    client.host = "http://127.0.0.1:11434"
+    client.timeout_seconds = 120
+    client.retry_attempts = 1
+    client.retry_backoff_seconds = 0
+    client.think = False
+    client.model_profiles = {}
+    client.logger = LLMCallLogger(tmp_path / "llm_calls.jsonl")
+
+    text = asyncio.run(
+        client.chat_async(
+            task_id="task-async-retry",
+            semantic_task="synthetic_text_generation",
+            model="llama3",
+            system_prompt="system",
+            user_prompt="user",
+            options={"temperature": 0.75},
+            response_format={"type": "object"},
+            think=True,
+        )
+    )
+
+    assert text == "async generated text"
+    assert attempts["count"] == 2
+    assert attempts["closed"] == 2
+    calls = [json.loads(line) for line in (tmp_path / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert calls[0]["status"] == "error"
+    assert calls[0]["error_type"] == "ReadTimeout"
+    assert calls[0]["attempt"] == 1
+    assert calls[0]["max_attempts"] == 2
+    assert calls[1]["status"] == "ok"
+    assert calls[1]["attempt"] == 2
