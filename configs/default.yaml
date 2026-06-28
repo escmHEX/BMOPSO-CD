@@ -248,7 +248,7 @@ mopso:
   c1: 1.5
   c2: 1.5
   vmax: 4.0
-  alpha: 1
+  alpha: 0.5
   p_tur_max: 0.08
   p_tur_min: 0.02
   p_anchor_enabled: true
