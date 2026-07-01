@@ -247,10 +247,10 @@ mopso:
   kcand: 6
   omega_max: 0.9
   omega_min: 0.4
-  c1: 1.5
-  c2: 1.5
+  c1: 1.25
+  c2: 1.75
   vmax: 4.0
-  alpha: 0.5
+  alpha: 0.3
   p_tur_max: 0.08
   p_tur_min: 0.02
   p_anchor_enabled: true
