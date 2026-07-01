@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from binary_mopso_cd.cli import apply_args, build_parser
@@ -57,6 +59,27 @@ def test_cli_set_updates_phase_task_model_override(test_config):
     )
     config = apply_args(test_config, args)
     assert config.get("router.phase_task_models.initialization.synthetic_text_generation") == "qwen3.5:2b"
+
+
+def test_cli_set_accepts_initial_population_reuse_paths(test_config, tmp_path):
+    population_path = tmp_path / "data_initial_population.json"
+    context_path = tmp_path / "reference_context.json"
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--reference-text",
+            "reference",
+            "--set",
+            f"initialization.population_input_path={json.dumps(str(population_path))}",
+            "--set",
+            f"initialization.reference_context_input_path={json.dumps(str(context_path))}",
+        ]
+    )
+
+    config = apply_args(test_config, args)
+
+    assert config.get("initialization.population_input_path") == str(population_path)
+    assert config.get("initialization.reference_context_input_path") == str(context_path)
 
 
 def test_cli_set_accepts_new_ollama_model_tags(test_config):

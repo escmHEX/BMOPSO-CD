@@ -229,6 +229,8 @@ semantic_components:
       max_words: 6
 
 initialization:
+  population_input_path: null
+  reference_context_input_path: null
   candidate_multiplier: 4
   min_product_multiplier: 3
   prompt_reduction_multiplier: 2

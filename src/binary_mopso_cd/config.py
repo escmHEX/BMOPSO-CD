@@ -408,6 +408,13 @@ class RuntimeConfig:
             raise ValueError("initialization.prompt_reduction_multiplier must be positive")
         if int(self.get("initialization.min_product_multiplier", 3)) <= 0:
             raise ValueError("initialization.min_product_multiplier must be positive")
+        for path in [
+            "initialization.population_input_path",
+            "initialization.reference_context_input_path",
+        ]:
+            value = self.get(path)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"{path} must be null or text")
         for component in self.components:
             if self.component_max_words(component) <= 0:
                 raise ValueError(f"semantic_components.rules.{component}.max_words must be positive")

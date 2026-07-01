@@ -84,21 +84,36 @@ class ExperimentRunner:
                 write_solutions(outdir / "data_initial_population.json", initial_population)
                 write_solutions(outdir / "data_inicial_evaluada.json", initial_population)
             else:
-                progress.stage(3, 6, "Construyendo poblacion inicial")
-                initial_builder = InitialPopulationBuilder(config, router, executor, rng, progress=progress)
-                initial_result = initial_builder.build_with_context(self.reference_text)
-                initial_population = initial_result.population
-                semantic_anchors = initial_result.semantic_anchors
                 pbest_state = None
                 archive_state = None
                 archive_stats = None
                 component_memory = None
                 start_generation = 0
-                central_anchors = (
-                    initial_builder.select_central_anchors(self.reference_text, semantic_anchors)
-                    if self._should_select_central_anchors(config, start_generation)
-                    else []
-                )
+                population_input_path = self._optional_path(config.get("initialization.population_input_path"))
+                reference_context_input_path = self._optional_path(config.get("initialization.reference_context_input_path"))
+                if population_input_path:
+                    progress.stage(3, 6, "Cargando poblacion inicial externa")
+                    initial_population = self._load_initial_population(population_input_path, config)
+                    semantic_anchors, central_anchors = self._load_or_build_reference_context(
+                        config,
+                        reference_context_input_path,
+                        router,
+                        executor,
+                        rng,
+                        progress,
+                        start_generation,
+                    )
+                else:
+                    progress.stage(3, 6, "Construyendo poblacion inicial")
+                    initial_builder = InitialPopulationBuilder(config, router, executor, rng, progress=progress)
+                    initial_result = initial_builder.build_with_context(self.reference_text)
+                    initial_population = initial_result.population
+                    semantic_anchors = initial_result.semantic_anchors
+                    central_anchors = (
+                        initial_builder.select_central_anchors(self.reference_text, semantic_anchors)
+                        if self._should_select_central_anchors(config, start_generation)
+                        else []
+                    )
                 write_json(
                     outdir / "reference_context.json",
                     {
@@ -178,6 +193,75 @@ class ExperimentRunner:
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def _optional_path(self, value: object) -> Path | None:
+        text = str(value or "").strip()
+        return Path(text) if text else None
+
+    def _load_json_file(self, path: Path, label: str) -> object:
+        if not path.exists():
+            raise FileNotFoundError(f"{label} not found: {path}")
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def _load_initial_population(self, path: Path, config: RuntimeConfig) -> list:
+        payload = self._load_json_file(path, "Initial population input")
+        if not isinstance(payload, list):
+            raise ValueError(f"Initial population input must be a JSON array: {path}")
+        if len(payload) != config.n:
+            raise ValueError(f"Initial population input must contain {config.n} solutions; got {len(payload)}.")
+        population = [solution_from_dict(item) for item in payload]
+        expected_components = set(config.components)
+        for index, solution in enumerate(population, start=1):
+            components = set(solution.vector.components)
+            if components != expected_components:
+                raise ValueError(
+                    "Initial population input solution "
+                    f"{index} components must match semantic_components.order: {sorted(expected_components)}"
+                )
+            if solution.objectives is None:
+                raise ValueError(f"Initial population input solution {index} must include objectives.")
+        return population
+
+    def _load_reference_context(self, path: Path) -> tuple[dict[str, list[str]], list[str]]:
+        payload = self._load_json_file(path, "Reference context input")
+        if not isinstance(payload, dict):
+            raise ValueError(f"Reference context input must be a JSON object: {path}")
+        raw_semantic_anchors = payload.get("semantic_anchors", {})
+        if not isinstance(raw_semantic_anchors, dict):
+            raise ValueError("Reference context input semantic_anchors must be an object.")
+        semantic_anchors = {
+            str(key): [str(item).strip() for item in values if str(item).strip()]
+            for key, values in raw_semantic_anchors.items()
+            if isinstance(values, list)
+        }
+        raw_central_anchors = payload.get("central_anchors", [])
+        if not isinstance(raw_central_anchors, list):
+            raise ValueError("Reference context input central_anchors must be an array.")
+        central_anchors = [str(item).strip() for item in raw_central_anchors if str(item).strip()]
+        return semantic_anchors, central_anchors
+
+    def _load_or_build_reference_context(
+        self,
+        config: RuntimeConfig,
+        reference_context_input_path: Path | None,
+        router: SemanticRouter,
+        executor: SemanticTaskExecutor,
+        rng: Random,
+        progress: ProgressLogger,
+        start_generation: int,
+    ) -> tuple[dict[str, list[str]], list[str]]:
+        if reference_context_input_path:
+            return self._load_reference_context(reference_context_input_path)
+        if not self._should_select_central_anchors(config, start_generation):
+            return {}, []
+        context_builder = InitialPopulationBuilder(config, router, executor, rng, progress=progress)
+        reference_context = context_builder.build_reference_context(self.reference_text)
+        central_anchors = context_builder.select_central_anchors(
+            self.reference_text,
+            reference_context.semantic_anchors,
+        )
+        return reference_context.semantic_anchors, central_anchors
 
     def _archive_stats_from_checkpoint(self, checkpoint_payload: dict) -> dict[str, int]:
         archive_stats = checkpoint_payload.get("archive_stats")
