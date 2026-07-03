@@ -5,7 +5,7 @@ experiment:
   seed: 42
   domain: "social media messages related to crises and emergencies"
   components: ["role", "topic", "action"]
-  frozen_components: []
+  frozen_components: ["role"]
 
 runtime:
   outdir_base: "exec"
